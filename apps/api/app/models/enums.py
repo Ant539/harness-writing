@@ -145,7 +145,17 @@ class WorkflowStepStatus(StrEnum):
 class WorkflowStepKind(StrEnum):
     DISCOVER = "discover"
     PLAN = "plan"
+    ASSEMBLE_PROMPTS = "assemble_prompts"
     GENERATE_OUTLINE = "generate_outline"
     REPLAN = "replan"
     GENERATE_CONTRACT = "generate_contract"
     SECTION_ACTION = "section_action"
+
+
+class PromptStage(StrEnum):
+    PLANNER = "planner"
+    WRITER = "writer"
+    REVIEWER = "reviewer"
+    REVISER = "reviser"
+    VERIFIER = "verifier"
+    EDITOR = "editor"

@@ -7,6 +7,7 @@ from app.models.evidence import EvidenceItem, EvidencePack, SourceMaterial
 from app.models.outline import OutlineNode
 from app.models.paper import Paper
 from app.models.planning import DiscoveryRecord, PlanningRun
+from app.models.prompts import PromptAssemblyArtifact, PromptExecutionLog
 from app.models.review import ReviewComment
 from app.models.revision import RevisionTask
 from app.models.style import StyleGuide
@@ -23,6 +24,8 @@ __all__ = [
     "OutlineNode",
     "Paper",
     "PlanningRun",
+    "PromptAssemblyArtifact",
+    "PromptExecutionLog",
     "ReviewComment",
     "RevisionTask",
     "SectionContract",

@@ -61,6 +61,8 @@ class GlobalReviewResponse(ApiSchema):
 
 class LatexExportOptions(ApiSchema):
     document_class: str = "article"
+    template_name: str | None = None
+    template_content: str | None = None
     author: str | None = None
     abstract: str | None = None
     include_table_of_contents: bool = False
@@ -68,6 +70,7 @@ class LatexExportOptions(ApiSchema):
     bibliography_style: str | None = "plainnat"
     bibliography_file: str | None = None
     extra_packages: list[str] = Field(default_factory=list)
+    validate_compile: bool = False
 
 
 class ManuscriptExportRequest(ApiSchema):
@@ -84,6 +87,7 @@ class ExportArtifactRead(ApiSchema):
     export_format: ExportFormat
     content: str
     artifact_path: str
+    metadata: dict = Field(default_factory=dict)
     status: ArtifactStatus
     created_at: datetime
 

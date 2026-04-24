@@ -115,13 +115,23 @@ Behavior:
 
 - Creates or reuses discovery.
 - Creates a planning run.
-- Optionally auto-executes the safest deterministic preparation steps:
+- Optionally auto-executes the safest deterministic workflow steps:
   - outline generation when the plan says outline work is needed
   - replanning after outline generation
   - deterministic contract generation for non-blocked sections when the section lifecycle allows it
+  - planner-driven section actions:
+    - `preserve`: records that the active draft should not be destructively regenerated
+    - `draft`: builds an evidence pack when evidence is available and creates a section draft
+    - `repair`: runs revision from review context when available, otherwise writes a conservative
+      fallback revision artifact
+    - `rewrite` and `polish`: create traceable revised draft versions from existing drafts when a
+      full review/revision path is not yet available
+    - `blocked`: persists an explicit skipped step with the planner reason
 - Supports `dry_run=true` to persist pending execution steps without mutating paper artifacts.
 - Persists workflow-run status plus step-level status (`pending`, `running`, `completed`, `failed`,
   `skipped`).
+- Section action step results include the planner action, reason, skip/fallback reason where
+  applicable, and draft/evidence artifact IDs when execution creates or reuses them.
 
 ### `GET /papers/{paper_id}/workflow-runs`
 
@@ -130,6 +140,51 @@ Lists persisted workflow runs for a paper.
 ### `GET /workflow-runs/{run_id}`
 
 Returns one workflow run with its persisted steps.
+
+## Prompt Assemblies
+
+### `POST /papers/{paper_id}/prompt-assemblies`
+
+Builds and persists a stage-specific prompt assembly artifact.
+
+Behavior:
+
+- Uses the latest planning run by default, or an explicit `planning_run_id`.
+- Composes prompt modules from planning outputs such as task profile, source mode, stage
+  instructions, style guidance, safety rules, and verification emphasis.
+- Injects the versioned stage prompt pack from `configs/prompt-packs/v1.json`.
+- Persists:
+  - module keys
+  - module contents
+  - assembled system prompt
+  - assembled user/runtime prompt
+  - prompt hash
+  - prompt pack version
+- Writes a prompt execution log entry for the assembled prompt.
+- Supersedes the previous active artifact for the same paper/stage/section scope and increments
+  the artifact version.
+
+### `GET /papers/{paper_id}/prompt-assemblies`
+
+Lists prompt assembly artifacts for a paper. Supports optional `stage` filtering.
+
+### `GET /prompt-assemblies/{artifact_id}`
+
+Returns one persisted prompt assembly artifact.
+
+### `GET /papers/{paper_id}/prompt-logs`
+
+Lists persisted prompt execution logs for a paper. Supports optional `stage` filtering.
+
+Current logged events:
+
+- prompt assembly creation for all stages
+- model-backed planner provider calls, including provider/model, prompt hash, response text, and
+  failed-provider errors when the planner falls back
+
+### `GET /prompt-logs/{log_id}`
+
+Returns one persisted prompt execution log.
 
 ## Outline And Section Contracts
 
@@ -469,6 +524,21 @@ Lists manuscript issues for a paper.
 Lists issues for one manuscript version.
 
 ### `POST /papers/{paper_id}/export`
+
+Exports the current assembled manuscript.
+
+LaTeX options:
+
+- `template_name`: currently supports `jcst` for the built-in JCST-style template-aware renderer
+- `template_content`: optional caller-provided LaTeX template skeleton; supported placeholders are
+  `{{title}}`, `{{author}}`, `{{abstract}}`, `{{body}}`, `{{bibliography}}`, `{{packages}}`, and
+  `{{extra_packages}}`
+- `validate_compile`: when true, runs deterministic LaTeX preflight validation and blocks export
+  if the generated `.tex` has unresolved placeholders, missing document environment, unbalanced
+  braces, or unmatched environments
+
+Export artifacts include metadata for template name, whether template content was supplied, whether
+compile validation was requested, and the validation result when applicable.
 
 Persists an export artifact for the current assembled manuscript.
 

@@ -19,6 +19,8 @@ def test_database_schema_contains_core_tables() -> None:
         "discovery_records",
         "papers",
         "planning_runs",
+        "prompt_assembly_artifacts",
+        "prompt_execution_logs",
         "outline_nodes",
         "section_contracts",
         "evidence_items",

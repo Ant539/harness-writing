@@ -28,6 +28,16 @@ As of April 24, 2026, the repository already has:
   provider is configured
 - a first unified workflow runner that can auto-infer discovery, generate a plan, prepare an
   outline, and prepare section contracts while recording step status
+- persisted prompt-assembly artifacts that compose reusable modules from planning output, workflow
+  stage, source mode, and risk emphasis
+- versioned prompt packs for planner, writer, reviewer, reviser, verifier, and editor stages
+- prompt hashes, prompt pack versions, persisted prompt modules, and prompt execution logs for
+  assembled prompts plus model-backed planner calls
+- planner-driven section action execution for preserve, polish, rewrite, repair, draft, and blocked,
+  with conservative deterministic fallbacks when full automation is not yet safe
+- template-aware LaTeX export for JCST-style submissions, including caller-supplied template
+  content with placeholder replacement
+- deterministic LaTeX compile preflight validation for exported manuscripts
 - deterministic evidence extraction and evidence-pack construction
 - deterministic section draft generation, review, revision, and manuscript assembly
 - Markdown and simple LaTeX export
@@ -43,11 +53,13 @@ As of April 24, 2026, the repository already has:
 - no multi-turn discovery phase that actively talks with the user to clarify the writing objective
 - no unified workflow runner that executes the whole document lifecycle automatically
 - no prompt-assembly layer that composes prompts from task profile and workflow state
-- no section/unit action engine driven by a planning decision
+- prompt logging currently covers prompt assembly and model-backed planner calls; writer/reviewer
+  model-call logging still needs to be wired into those lower-level generators
+- no fully tuned model-backed section/unit action engine beyond the first deterministic execution
+  bridge
 - no robust prompt pack tuned across multiple writing domains
 - no robust global editor/verifier loop
-- no template-aware final export for venue-sensitive targets
-- no compile/quality gate between export and "submission-ready"
+- no external LaTeX compiler integration yet; current validation is a deterministic preflight gate
 
 ## Target State
 
@@ -155,7 +167,7 @@ Expected result:
 
 ### 4. Section / Unit Action Engine
 
-Needed:
+Implemented first pass:
 
 - runtime support for planner actions:
   - `preserve`
@@ -164,8 +176,18 @@ Needed:
   - `repair`
   - `draft`
   - `blocked`
+- workflow-step persistence records each section action, status, output draft IDs, and skip/fallback
+  reasons
+- `draft` attempts deterministic evidence-pack alignment and section drafting
+- `repair` uses existing review/revision context where possible, with conservative fallback revision
+- `rewrite` and `polish` produce new traceable draft versions when existing draft text is available
+- `preserve` records the non-destructive decision without generating a new draft
+- `blocked` records an explicit skipped step
+
+Still needed:
+
 - section diagnostics before generation
-- section review/revision loop driven by planning output
+- tuned model-backed prompts and deeper section review/revision loops driven by planning output
 
 Expected result:
 

@@ -34,7 +34,9 @@ def _issue_read(issue: ManuscriptIssue) -> ManuscriptIssueRead:
 
 
 def _export_read(export: ExportArtifact) -> ExportArtifactRead:
-    return ExportArtifactRead.model_validate(export)
+    data = export.model_dump()
+    data["metadata"] = export.metadata_json
+    return ExportArtifactRead.model_validate(data)
 
 
 def _paper_read(paper: Paper) -> PaperRead:

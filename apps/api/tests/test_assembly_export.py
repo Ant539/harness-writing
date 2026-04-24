@@ -199,6 +199,66 @@ def test_markdown_and_latex_export_are_persisted(client) -> None:
     assert {item["export_format"] for item in exports.json()} == {"markdown", "latex"}
 
 
+def test_jcst_template_aware_latex_export_and_compile_validation(client) -> None:
+    paper, outline = _create_paper_with_outline(client)
+    _draft_section(client, paper, _section(outline, "Introduction"), citation_key="smith2024")
+    assemble_response = client.post(f"/papers/{paper['id']}/assemble", json={})
+    assert assemble_response.status_code == 200
+
+    response = client.post(
+        f"/papers/{paper['id']}/export",
+        json={
+            "export_format": "latex",
+            "latex": {
+                "template_name": "jcst",
+                "author": "Paper Harness",
+                "abstract": "Template-aware export keeps submission structure.",
+                "bibliography_file": "references.bib",
+                "validate_compile": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    export = response.json()["export"]
+    assert export["metadata"]["template_name"] == "jcst"
+    assert export["metadata"]["compile_validation"]["status"] == "passed"
+    assert "JCST template-aware export path" in export["content"]
+    assert "\\documentclass[10pt,twocolumn]{article}" in export["content"]
+    assert "\\title{ Assembly Harnesses }" in export["content"]
+    assert "\\begin{document}" in export["content"]
+    assert "\\section{Introduction}" in export["content"]
+
+
+def test_latex_compile_validation_rejects_unresolved_template_placeholders(client) -> None:
+    paper, outline = _create_paper_with_outline(client)
+    _draft_section(client, paper, _section(outline, "Introduction"))
+    assemble_response = client.post(f"/papers/{paper['id']}/assemble", json={})
+    assert assemble_response.status_code == 200
+
+    response = client.post(
+        f"/papers/{paper['id']}/export",
+        json={
+            "export_format": "latex",
+            "latex": {
+                "template_name": "jcst",
+                "template_content": (
+                    "\\documentclass{article}\n"
+                    "\\begin{document}\n"
+                    "{{body}}\n"
+                    "{{unknown_placeholder}}\n"
+                    "\\end{document}\n"
+                ),
+                "validate_compile": True,
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["validation"]["status"] == "failed"
+    assert "Unresolved template placeholder" in response.json()["detail"]["validation"]["errors"][0]
+
+
 def test_invalid_assembly_review_and_export_flows(client) -> None:
     paper_response = client.post(
         "/papers",

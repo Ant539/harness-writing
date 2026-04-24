@@ -1,3 +1,51 @@
+import json
+
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from app import models  # noqa: F401
+from app.models import Paper, PromptExecutionLog
+from app.models.enums import PaperType, PromptStage
+from app.schemas.planning import PlanningRunCreate
+from app.services.llm import LLMRequest, LLMResult
+from app.services.planner import WorkflowPlanningService
+
+
+class FakePlannerProvider:
+    provider_name = "fake_planner"
+
+    def generate(self, request: LLMRequest) -> LLMResult:
+        payload = {
+            "task_profile": {
+                "document_type": "academic_paper",
+                "audience": "Test reader",
+                "success_criteria": ["Stay executable."],
+                "constraints": ["Do not invent."],
+            },
+            "entry_strategy": {
+                "source_mode": "new_paper",
+                "current_maturity": "idea",
+                "rationale": "Fake provider model path.",
+            },
+            "paper_plan": {
+                "objective": "Exercise model-backed planner logging.",
+                "global_risks": [],
+                "workflow_steps": ["discover", "plan"],
+            },
+            "section_plans": [],
+            "prompt_assembly_hints": {
+                "required_prompt_modules": ["task_profile", "stage_prompt_pack"],
+                "style_profile": "default_academic",
+                "risk_emphasis": [],
+            },
+        }
+        return LLMResult(
+            content=json.dumps(payload),
+            provider=self.provider_name,
+            model="fake-model",
+        )
+
+
 def _create_paper(client) -> dict:
     response = client.post(
         "/papers",
@@ -109,3 +157,36 @@ def test_plan_builds_mixed_section_actions_from_existing_outline_and_drafts(clie
     assert section_plans["Introduction"]["action"] == "preserve"
     assert section_plans["Conclusion"]["action"] == "draft"
     assert section_plans["Conclusion"]["section_id"] == conclusion["id"]
+
+
+def test_model_backed_planner_persists_prompt_execution_log() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        paper = Paper(title="Model Planner Logging", paper_type=PaperType.CONCEPTUAL)
+        session.add(paper)
+        session.commit()
+        session.refresh(paper)
+
+        service = WorkflowPlanningService(session, llm_provider=FakePlannerProvider())
+        plan = service.generate_plan(paper.id, PlanningRunCreate(force_deterministic=False))
+
+        assert plan.planner_mode == "model"
+        log = session.exec(
+            select(PromptExecutionLog).where(
+                PromptExecutionLog.paper_id == paper.id,
+                PromptExecutionLog.stage == PromptStage.PLANNER,
+            )
+        ).first()
+        assert log is not None
+        assert log.provider == "fake_planner"
+        assert log.model_name == "fake-model"
+        assert log.status == "completed"
+        assert log.prompt_hash
+        assert "Build a structured workflow plan" in (log.user_prompt or "")
+        assert "task_profile" in (log.response_text or "")

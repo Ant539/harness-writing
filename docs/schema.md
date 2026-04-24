@@ -149,10 +149,20 @@ Implemented enums live in `apps/api/app/models/enums.py`.
 
 - `discover`
 - `plan`
+- `assemble_prompts`
 - `generate_outline`
 - `replan`
 - `generate_contract`
 - `section_action`
+
+### PromptStage
+
+- `planner`
+- `writer`
+- `reviewer`
+- `reviser`
+- `verifier`
+- `editor`
 
 ## Persisted Models
 
@@ -267,6 +277,69 @@ Key fields:
 - `completed_at`
 - `created_at`
 - `updated_at`
+
+Current section-action result behavior:
+
+- `step_type=section_action` records the planner action, section title, planner reason, evidence and
+  review-loop needs, and the action outcome.
+- Completed action steps may include draft IDs, previous draft IDs, evidence-pack IDs, resolved
+  review comment IDs, completed revision task IDs, and fallback metadata.
+- Skipped action steps include a `skip_reason`; blocked sections are represented as skipped
+  section-action steps with `outcome=blocked`.
+
+### PromptAssemblyArtifact
+
+File: `apps/api/app/models/prompts.py`
+
+Represents one persisted prompt assembly for a workflow stage.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `planning_run_id`
+- `workflow_run_id`
+- `section_id`
+- `stage`
+- `version`
+- `module_keys`
+- `modules_json`
+- `system_prompt`
+- `user_prompt`
+- `prompt_hash`
+- `prompt_pack_version`
+- `status`
+- `metadata_json`
+- `created_at`
+
+### PromptExecutionLog
+
+File: `apps/api/app/models/prompts.py`
+
+Represents an audit log for assembled prompts and model-backed prompt calls.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `planning_run_id`
+- `workflow_run_id`
+- `prompt_assembly_id`
+- `section_id`
+- `stage`
+- `provider`
+- `model_name`
+- `status`
+- `prompt_hash`
+- `prompt_version`
+- `prompt_pack_version`
+- `module_keys`
+- `request_metadata_json`
+- `system_prompt`
+- `user_prompt`
+- `response_text`
+- `error_message`
+- `created_at`
 
 ### OutlineNode
 
@@ -497,6 +570,7 @@ Key fields:
 - `export_format`
 - `content`
 - `artifact_path`
+- `metadata_json`
 - `status`
 - `created_at`
 

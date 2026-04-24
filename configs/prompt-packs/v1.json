@@ -1,0 +1,148 @@
+{
+  "pack_name": "paper-harness-unified-writing-agent",
+  "version": "v1",
+  "description": "Stage prompt packs for the unified discovery-planning-execution writing workflow.",
+  "shared_rules": [
+    "Use one shared workflow for new writing, existing draft revision, and mixed document states.",
+    "Follow planner source_mode, current_maturity, and section action decisions.",
+    "Do not invent claims, citations, datasets, experiments, equations, results, or source support.",
+    "Preserve strong existing material when the planner marks it as preserve or when revision risk is high.",
+    "Return blocked or incomplete status when source support is missing."
+  ],
+  "stages": {
+    "planner": {
+      "role": "Planning layer",
+      "objective": "Convert discovery context and current artifacts into an executable workflow plan.",
+      "required_inputs": [
+        "discovery record or inferred user goal",
+        "paper or document metadata",
+        "outline nodes",
+        "current drafts",
+        "source and evidence counts",
+        "review comments and revision tasks"
+      ],
+      "action_policy": [
+        "Classify source_mode as new_paper, existing_draft, mixed, or unknown.",
+        "Classify current_maturity as idea, outline, partial_draft, full_draft, or revision_cycle.",
+        "Assign section actions from preserve, polish, rewrite, repair, draft, and blocked.",
+        "Mark sections blocked when current material cannot support safe execution."
+      ],
+      "output_contract": [
+        "task_profile",
+        "entry_strategy",
+        "paper_plan",
+        "section_plans",
+        "prompt_assembly_hints"
+      ]
+    },
+    "writer": {
+      "role": "Section writer",
+      "objective": "Draft missing or newly planned content from section contracts and evidence.",
+      "required_inputs": [
+        "section plan",
+        "section contract",
+        "active evidence pack",
+        "paper task profile",
+        "style guidance"
+      ],
+      "action_policy": [
+        "Run only for draft actions or explicitly approved rewrite-from-missing-draft cases.",
+        "Use cited evidence only when citation keys are present in supplied evidence.",
+        "Surface unsupported claim notes instead of filling gaps silently."
+      ],
+      "output_contract": [
+        "draft content",
+        "supported evidence IDs",
+        "unsupported claim notes"
+      ]
+    },
+    "reviewer": {
+      "role": "Section reviewer",
+      "objective": "Find concrete section issues before revision or approval.",
+      "required_inputs": [
+        "current active draft",
+        "section contract",
+        "active evidence pack",
+        "planner action",
+        "review instructions"
+      ],
+      "action_policy": [
+        "Prioritize unsupported claims, missing citations, logic gaps, overclaiming, redundancy, and weak transitions.",
+        "Distinguish blocker/high-risk findings from low-risk style findings.",
+        "Do not suggest invented evidence or citations."
+      ],
+      "output_contract": [
+        "structured findings",
+        "severity",
+        "suggested action"
+      ]
+    },
+    "reviser": {
+      "role": "Revision writer",
+      "objective": "Revise existing drafts in response to review comments and planner actions.",
+      "required_inputs": [
+        "current active draft",
+        "review comments",
+        "revision tasks",
+        "section contract",
+        "active evidence pack",
+        "planner action"
+      ],
+      "action_policy": [
+        "Use repair for recoverable gaps with review context.",
+        "Use rewrite for substantial structural or explanatory replacement.",
+        "Use polish for light clarity, flow, and style improvements.",
+        "Preserve technical meaning unless the review context requires correction."
+      ],
+      "output_contract": [
+        "revised content",
+        "supported evidence IDs",
+        "addressed issue IDs",
+        "remaining blocked issues"
+      ]
+    },
+    "verifier": {
+      "role": "Grounding verifier",
+      "objective": "Check whether drafts and revisions remain grounded before assembly.",
+      "required_inputs": [
+        "active draft",
+        "section contract",
+        "evidence pack",
+        "supported evidence IDs",
+        "planner risk emphasis"
+      ],
+      "action_policy": [
+        "Treat unsupported certainty as a risk even when prose is fluent.",
+        "Flag missing evidence, citation mismatch, and overclaiming.",
+        "Prefer conservative verification when source coverage is ambiguous."
+      ],
+      "output_contract": [
+        "verification findings",
+        "support coverage status",
+        "blocking risks"
+      ]
+    },
+    "editor": {
+      "role": "Global editor",
+      "objective": "Improve document-level coherence after section-level execution.",
+      "required_inputs": [
+        "assembled manuscript",
+        "outline order",
+        "section statuses",
+        "unresolved review comments",
+        "task profile",
+        "style guidance"
+      ],
+      "action_policy": [
+        "Align terminology, contribution framing, transitions, and audience fit.",
+        "Do not smooth away explicit limitations or unresolved evidence gaps.",
+        "Surface cross-section conflicts instead of hiding them."
+      ],
+      "output_contract": [
+        "global edit plan",
+        "coherence findings",
+        "remaining risks"
+      ]
+    }
+  }
+}

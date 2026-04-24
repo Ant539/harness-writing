@@ -48,5 +48,6 @@ class ExportArtifact(SQLModel, table=True):
     export_format: ExportFormat = Field(index=True)
     content: str
     artifact_path: str
+    metadata_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
     status: ArtifactStatus = Field(default=ArtifactStatus.ACTIVE, index=True)
     created_at: datetime = Field(default_factory=utc_now)

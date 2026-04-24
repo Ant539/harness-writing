@@ -11,12 +11,12 @@ artifacts, not in this file.
 - [x] Add a discovery phase foundation that persists the user's document goal, audience, constraints, and success criteria before planning.
 - [x] Implement a persisted planning artifact and/or planning run record.
 - [x] Add a unified workflow runner that begins with discovery and planning, then uses planner output to decide actions.
-- [ ] Add prompt assembly foundations that compose prompts from use case, task profile, source mode, workflow stage, and risk profile.
-- [ ] Add section/unit action execution for `preserve`, `polish`, `rewrite`, `repair`, `draft`, and `blocked`.
-- [ ] Add prompt packs for planner, writer, reviewer, reviser, verifier, and global editor.
-- [ ] Add prompt versioning, prompt logging, and prompt module persistence for model-backed runs.
-- [ ] Add a template-aware JCST export path that preserves the original submission template structure.
-- [ ] Add manuscript compile validation for exported LaTeX.
+- [x] Add prompt assembly foundations that compose prompts from use case, task profile, source mode, workflow stage, and risk profile.
+- [x] Add section/unit action execution for `preserve`, `polish`, `rewrite`, `repair`, `draft`, and `blocked`.
+- [x] Add prompt packs for planner, writer, reviewer, reviser, verifier, and global editor.
+- [x] Add prompt versioning, prompt logging, and prompt module persistence for model-backed runs.
+- [x] Add a template-aware JCST export path that preserves the original submission template structure.
+- [x] Add manuscript compile validation for exported LaTeX.
 
 ## Near Term
 

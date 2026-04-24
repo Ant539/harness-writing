@@ -187,6 +187,16 @@ class AssemblyService:
             export_format=export_format,
             latex_options=request.latex,
         )
+        metadata = self._export_metadata(export_format, request, content)
+        validation = metadata.get("compile_validation")
+        if request.latex.validate_compile and validation and validation.get("status") != "passed":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "LaTeX compile validation failed.",
+                    "validation": validation,
+                },
+            )
         version = self._next_export_version(paper.id, export_format)
         extension = self.export_generator.extension_for(export_format)
         artifact_path = (
@@ -202,12 +212,33 @@ class AssemblyService:
             export_format=export_format,
             content=content,
             artifact_path=artifact_path,
+            metadata_json=metadata,
             status=ArtifactStatus.ACTIVE,
         )
         self.session.add(export)
         self.session.commit()
         self.session.refresh(export)
         return manuscript, export
+
+    def _export_metadata(
+        self,
+        export_format: ExportFormat,
+        request: ManuscriptExportRequest,
+        content: str,
+    ) -> dict:
+        if export_format != ExportFormat.LATEX:
+            return {}
+        template_name = request.latex.template_name
+        if template_name:
+            template_name = "".join(char for char in template_name.lower() if char.isalnum() or char in "_-")
+        metadata = {
+            "template_name": template_name,
+            "template_content_provided": bool(request.latex.template_content),
+            "compile_validation_requested": request.latex.validate_compile,
+        }
+        if request.latex.validate_compile:
+            metadata["compile_validation"] = self.export_generator.validate_latex_compile(content)
+        return metadata
 
     def list_exports(self, paper_id: uuid.UUID) -> list[ExportArtifact]:
         return list(

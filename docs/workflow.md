@@ -18,7 +18,7 @@ writer, and reviewer calls are now available behind the same service boundaries.
 8. Revise the section draft with `POST /sections/{section_id}/revise`.
 9. Assemble the manuscript with `POST /papers/{paper_id}/assemble`.
 10. Run global review with `POST /papers/{paper_id}/global-review`.
-11. Export Markdown or simple LaTeX with `POST /papers/{paper_id}/export`.
+11. Export Markdown, default LaTeX, or template-aware LaTeX with `POST /papers/{paper_id}/export`.
 
 ## Unified Workflow Rule
 
@@ -50,6 +50,9 @@ the persistence foundation now exists:
   strategy, paper plan, section plans, and prompt-assembly hints
 - `POST /papers/{paper_id}/workflow-runs` runs the first unified orchestration pass and persists
   workflow-run plus workflow-step records
+- `POST /papers/{paper_id}/prompt-assemblies` assembles and persists stage-specific prompt artifacts
+- `GET /papers/{paper_id}/prompt-logs` returns persisted prompt execution logs for assembled prompts
+  and model-backed planner calls
 - `GET /papers/{paper_id}/discovery` and `GET /papers/{paper_id}/plan` return the latest saved
   records
 
@@ -59,7 +62,18 @@ Current runner behavior:
 - creates a planning run
 - if execution is enabled and the plan says outline work is needed, generates an outline
 - replans after outline generation
+- assembles reusable prompt artifacts for writer, reviewer, reviser, verifier, and editor stages
+- injects the versioned stage prompt pack into assembled prompts and records prompt hash/version
+  metadata
 - prepares deterministic section contracts for non-blocked sections when safe
+- executes planner section actions through the first section-action bridge:
+  - `preserve` records a non-destructive preserved decision
+  - `draft` aligns evidence when available and creates a deterministic section draft
+  - `repair` uses review/revision context when available, otherwise persists a conservative fallback
+    revision
+  - `rewrite` and `polish` create traceable revised draft versions from existing draft text when a
+    full review/revision path is unavailable
+  - `blocked` records a skipped blocked step with the planner reason
 - records completed, pending, skipped, or failed workflow steps
 
 ## Paper Lifecycle
@@ -123,9 +137,16 @@ Planning:
 - Discovery records and planning runs now persist the first workflow decisions for task profile,
   source mode, maturity, section actions, and prompt-assembly hints.
 - The first workflow runner now consumes persisted planning output to decide whether to prepare an
-  outline and section contracts.
-- A future workflow runner should extend that execution path through evidence, drafting, review,
-  revision, assembly, and export.
+  outline, assemble prompt artifacts, prepare section contracts, and execute section actions.
+- Section action execution now reaches evidence alignment, drafting, review/revision when the
+  current deterministic preconditions are satisfied, and records skipped/fallback outcomes when
+  they are not.
+- Prompt assembly now uses `configs/prompt-packs/v1.json` to inject stage-specific role packs for
+  planner, writer, reviewer, reviser, verifier, and editor stages.
+- Prompt artifacts persist module contents, prompt hashes, prompt pack versions, and prompt
+  execution logs; model-backed planner calls also persist prompt and response logs.
+- A future workflow runner should extend that execution path through global assembly, document
+  review, final revision, and export.
 
 Evidence:
 
@@ -153,13 +174,20 @@ Global review and export:
 
 - Global review checks missing drafted sections, unresolved section reviews, missing introduction/conclusion, transition language, terminology drift, and duplicate sibling order indexes.
 - Markdown export returns assembled content.
-- LaTeX export is minimal and does not generate a bibliography.
+- LaTeX export can use the default article renderer or a template-aware path. The built-in
+  `template_name=jcst` renderer preserves a submission-template structure with placeholders for
+  title, author, abstract, body, packages, and bibliography. Callers may also pass
+  `template_content` to preserve a specific template skeleton.
+- `validate_compile=true` runs a deterministic LaTeX preflight for document environment, unresolved
+  template placeholders, brace balance, environment matching, and bibliography-style warnings. It
+  blocks export when preflight fails, but it does not shell out to an external TeX compiler yet.
 
 ## Current Workflow Gaps
 
 - No multi-turn conversational discovery agent yet.
 - No full-document workflow runner yet that reaches evidence, drafting, review, assembly, and export.
-- No planner-driven section action engine for preserve/polish/rewrite/repair/draft/blocked.
+- Planner-driven section action execution is first-pass only; it still needs tuned prompt packs,
+  richer diagnostics, retry/resume controls, and stronger model-backed revision behavior.
 - No real LLM researcher, verifier, or global editor yet.
 - No full section locking/approval workflow.
 - No unified workflow runner yet that decides when export files should be written automatically.

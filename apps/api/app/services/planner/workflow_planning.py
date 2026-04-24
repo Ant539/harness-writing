@@ -28,6 +28,7 @@ from app.models.enums import (
     DocumentMaturity,
     DocumentType,
     PlanningMode,
+    PromptStage,
     SectionAction,
     SourceMode,
 )
@@ -47,6 +48,7 @@ from app.services.crud import get_or_404
 from app.services.llm import LLMMessage, LLMProvider, LLMRequest, get_llm_provider
 from app.services.llm.json_utils import parse_json_object
 from app.services.llm.providers import LLMProviderError
+from app.services.prompt_logging import PromptLoggingService
 
 
 @dataclass(frozen=True)
@@ -293,14 +295,37 @@ class WorkflowPlanningService:
             "- prompt_assembly_hints\n"
             "Keep values conservative and avoid inventing source support."
         )
-        result = self.llm_provider.generate(
-            LLMRequest(
-                messages=[
-                    LLMMessage(role="system", content=system),
-                    LLMMessage(role="user", content=user),
-                ],
-                expect_json=True,
+        request = LLMRequest(
+            messages=[
+                LLMMessage(role="system", content=system),
+                LLMMessage(role="user", content=user),
+            ],
+            expect_json=True,
+            metadata={"stage": "planner", "path": "workflow_planning"},
+        )
+        try:
+            result = self.llm_provider.generate(request)
+        except LLMProviderError as exc:
+            PromptLoggingService(self.session).create_log(
+                paper_id=context.paper.id,
+                stage=PromptStage.PLANNER,
+                provider=self.llm_provider.provider_name if self.llm_provider is not None else None,
+                status="failed",
+                system_prompt=system,
+                user_prompt=user,
+                error_message=str(exc),
+                request_metadata={"expect_json": True, "path": "workflow_planning"},
             )
+            raise
+        PromptLoggingService(self.session).create_log(
+            paper_id=context.paper.id,
+            stage=PromptStage.PLANNER,
+            provider=result.provider,
+            model_name=result.model,
+            system_prompt=system,
+            user_prompt=user,
+            response_text=result.content,
+            request_metadata={"expect_json": True, "path": "workflow_planning"},
         )
         payload = parse_json_object(result.content)
         return PlanningOutput.model_validate(payload)
@@ -536,6 +561,8 @@ class WorkflowPlanningService:
             "task_profile",
             "source_mode",
             "stage_instructions",
+            "stage_prompt_pack",
+            "style_guidance",
             "safety_and_non_invention_rules",
             "output_schema",
         ]

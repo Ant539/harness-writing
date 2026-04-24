@@ -66,6 +66,14 @@ class ExportGenerator:
 
         body = "\n".join(body_lines).strip()
         bibliography = self._bibliography(options)
+        if options.template_content or self._template_name(options) == "jcst":
+            return self._template_latex(
+                paper=paper,
+                options=options,
+                abstract=abstract,
+                body=body,
+                bibliography=bibliography,
+            )
         return (
             f"\\documentclass{{{self._safe_class(options.document_class)}}}\n"
             "\\usepackage[utf8]{inputenc}\n"
@@ -86,6 +94,36 @@ class ExportGenerator:
             f"{bibliography}"
             "\\end{document}\n"
         )
+
+    def validate_latex_compile(self, content: str) -> dict:
+        """Run a deterministic LaTeX compile preflight without shelling out."""
+
+        errors: list[str] = []
+        warnings: list[str] = []
+        if "\\begin{document}" not in content:
+            errors.append("Missing \\begin{document}.")
+        if "\\end{document}" not in content:
+            errors.append("Missing \\end{document}.")
+        if "{{" in content or "}}" in content:
+            errors.append("Unresolved template placeholder remains in exported LaTeX.")
+        if self._unescaped_count(content, "{") != self._unescaped_count(content, "}"):
+            errors.append("Unbalanced LaTeX braces detected.")
+
+        begin_envs = re.findall(r"\\begin\{([^{}]+)\}", content)
+        end_envs = re.findall(r"\\end\{([^{}]+)\}", content)
+        if begin_envs.count("document") != 1 or end_envs.count("document") != 1:
+            errors.append("Expected exactly one document environment.")
+        for env in sorted(set(begin_envs) | set(end_envs)):
+            if begin_envs.count(env) != end_envs.count(env):
+                errors.append(f"Environment '{env}' has unmatched begin/end commands.")
+        if "\\bibliography{" in content and "\\bibliographystyle{" not in content:
+            warnings.append("Bibliography file is configured without an explicit bibliography style.")
+
+        return {
+            "status": "passed" if not errors else "failed",
+            "errors": errors,
+            "warnings": warnings,
+        }
 
     def _extract_abstract(
         self,
@@ -162,6 +200,66 @@ class ExportGenerator:
             "\\end{abstract}\n\n"
         )
 
+    def _template_latex(
+        self,
+        *,
+        paper: Paper,
+        options: LatexExportOptions,
+        abstract: str | None,
+        body: str,
+        bibliography: str,
+    ) -> str:
+        template = options.template_content or self._builtin_template(self._template_name(options))
+        replacements = {
+            "document_class": self._safe_class(options.document_class),
+            "packages": self._default_packages() + self._extra_packages(options),
+            "extra_packages": self._extra_packages(options),
+            "title": self._escape(paper.title),
+            "author": self._author(options).strip(),
+            "abstract": self._abstract(abstract).strip(),
+            "body": body,
+            "bibliography": bibliography.strip(),
+        }
+        rendered = template
+        for key, value in replacements.items():
+            rendered = rendered.replace(f"{{{{{key}}}}}", value)
+            rendered = rendered.replace(f"{{{{ {key} }}}}", value)
+        return rendered.strip() + "\n"
+
+    def _builtin_template(self, template_name: str | None) -> str:
+        if template_name == "jcst":
+            return (
+                "\\documentclass[10pt,twocolumn]{article}\n"
+                "% JCST template-aware export path. Replace with the official class file "
+                "when available.\n"
+                "{{packages}}"
+                "\\title{ {{title}} }\n"
+                "{{author}}\n"
+                "\\date{}\n"
+                "\\begin{document}\n"
+                "\\maketitle\n\n"
+                "{{abstract}}\n\n"
+                "{{body}}\n\n"
+                "{{bibliography}}\n"
+                "\\end{document}\n"
+            )
+        raise ValueError(f"Unsupported LaTeX template: {template_name}")
+
+    def _template_name(self, options: LatexExportOptions) -> str | None:
+        if not options.template_name:
+            return None
+        return re.sub(r"[^A-Za-z0-9_-]", "", options.template_name).lower() or None
+
+    def _default_packages(self) -> str:
+        return (
+            "\\usepackage[utf8]{inputenc}\n"
+            "\\usepackage[T1]{fontenc}\n"
+            "\\usepackage{lmodern}\n"
+            "\\usepackage[margin=1in]{geometry}\n"
+            "\\usepackage{natbib}\n"
+            "\\usepackage{hyperref}\n"
+        )
+
     def _author(self, options: LatexExportOptions) -> str:
         if not options.author:
             return ""
@@ -186,6 +284,9 @@ class ExportGenerator:
             if package_name:
                 lines.append(f"\\usepackage{{{package_name}}}\n")
         return "".join(lines)
+
+    def _unescaped_count(self, text: str, char: str) -> int:
+        return len(re.findall(rf"(?<!\\){re.escape(char)}", text))
 
     def _safe_class(self, value: str) -> str:
         safe = re.sub(r"[^A-Za-z0-9_-]", "", value)
