@@ -1,0 +1,142 @@
+{
+  "workflow_name": "paper-harness-unified-agent-workflow",
+  "version": 1,
+  "description": "One workflow for both new papers and existing manuscripts. The planning phase determines the entry strategy and section actions.",
+  "principles": [
+    "Use one shared workflow graph for all papers.",
+    "Decide source mode during planning rather than selecting separate workflows upfront.",
+    "Begin with discovery and user-goal clarification before planning.",
+    "Treat academic paper handling as one use case within a broader writing-agent system.",
+    "Keep development tracking separate from runtime execution state."
+  ],
+  "supported_use_cases": [
+    "academic_paper",
+    "student_report",
+    "thesis",
+    "proposal",
+    "technical_document",
+    "literature_review"
+  ],
+  "discovery_phase": {
+    "required_outputs": [
+      "document_type",
+      "target_audience",
+      "success_criteria",
+      "constraints",
+      "available_source_materials",
+      "current_document_state"
+    ],
+    "notes": [
+      "If the goal is unclear, the system should ask or infer conservatively.",
+      "Discovery is part of the workflow, not an optional pre-step outside the workflow."
+    ]
+  },
+  "plan_phase": {
+    "required_outputs": [
+      "task_profile",
+      "entry_strategy.source_mode",
+      "entry_strategy.current_maturity",
+      "entry_strategy.rationale",
+      "paper_plan.objective",
+      "paper_plan.global_risks",
+      "paper_plan.workflow_steps",
+      "section_plans",
+      "prompt_assembly_hints"
+    ],
+    "allowed_source_modes": [
+      "new_paper",
+      "existing_draft",
+      "mixed",
+      "unknown"
+    ],
+    "allowed_document_types": [
+      "academic_paper",
+      "report",
+      "thesis",
+      "proposal",
+      "technical_document",
+      "unknown"
+    ],
+    "allowed_current_maturity": [
+      "idea",
+      "outline",
+      "partial_draft",
+      "full_draft",
+      "revision_cycle"
+    ],
+    "allowed_section_actions": [
+      "preserve",
+      "polish",
+      "rewrite",
+      "repair",
+      "draft",
+      "blocked"
+    ]
+  },
+  "shared_pipeline": [
+    "discover",
+    "plan",
+    "assemble_prompts",
+    "outline_or_outline_reconciliation",
+    "contract_generation_or_update",
+    "evidence_gathering_or_alignment",
+    "section_write_or_revision",
+    "section_review",
+    "section_revision_loop",
+    "assembly",
+    "global_review",
+    "final_revision",
+    "export"
+  ],
+  "entry_behavior": {
+    "new_paper": [
+      "generate or refine outline",
+      "create contracts",
+      "gather evidence",
+      "draft sections"
+    ],
+    "existing_draft": [
+      "import or inspect existing manuscript",
+      "reconcile outline with current manuscript structure",
+      "preserve, polish, rewrite, or repair sections based on planner output"
+    ],
+    "mixed": [
+      "reuse existing drafted sections where defensible",
+      "draft missing sections from outline and evidence",
+      "repair incomplete sections before whole-paper assembly"
+    ],
+    "unknown": [
+      "stop for clarification or produce a conservative diagnostic plan"
+    ]
+  },
+  "prompt_assembly": {
+    "goal": "Assemble downstream prompts from task profile, source mode, use case, risk profile, and workflow stage.",
+    "required_inputs": [
+      "task_profile",
+      "entry_strategy",
+      "paper_plan",
+      "section_plans"
+    ],
+    "outputs": [
+      "system prompt modules",
+      "role instructions",
+      "style and safety constraints",
+      "stage-specific prompt blocks"
+    ]
+  },
+  "separation_of_concerns": {
+    "runtime_state": [
+      "paper artifacts",
+      "section artifacts",
+      "workflow runs",
+      "user interaction history",
+      "workflow state snapshots",
+      "prompt inputs and outputs"
+    ],
+    "development_state": [
+      "repository todo list",
+      "development roadmap",
+      "implementation plan"
+    ]
+  }
+}

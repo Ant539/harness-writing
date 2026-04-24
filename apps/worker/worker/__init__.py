@@ -1,0 +1,1 @@
+"""Paper Harness worker package."""

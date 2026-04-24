@@ -1,0 +1,54 @@
+[project]
+name = "paper-harness"
+version = "0.1.0"
+description = "Monorepo scaffold for Paper Harness."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+  "apps/api",
+  "apps/worker",
+  "packages/core",
+  "packages/planner",
+  "packages/research",
+  "packages/drafting",
+  "packages/review",
+  "packages/verify",
+  "packages/editor",
+  "packages/memory",
+  "packages/export"
+]
+
+[tool.uv.sources]
+paper-harness-core = { workspace = true }
+paper-harness-planner = { workspace = true }
+paper-harness-research = { workspace = true }
+paper-harness-drafting = { workspace = true }
+paper-harness-review = { workspace = true }
+paper-harness-verify = { workspace = true }
+paper-harness-editor = { workspace = true }
+paper-harness-memory = { workspace = true }
+paper-harness-export = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+addopts = [
+  "--import-mode=importlib"
+]
+testpaths = [
+  "apps/api/tests",
+  "apps/worker/tests",
+  "packages/core/tests",
+  "packages/planner/tests",
+  "packages/research/tests",
+  "packages/drafting/tests",
+  "packages/review/tests",
+  "packages/verify/tests",
+  "packages/editor/tests",
+  "packages/memory/tests",
+  "packages/export/tests"
+]

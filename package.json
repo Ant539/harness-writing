@@ -1,0 +1,13 @@
+{
+  "name": "paper-harness",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @paper-harness/web dev",
+    "lint:web": "pnpm --filter @paper-harness/web lint",
+    "test": "pnpm --filter @paper-harness/web test"
+  },
+  "workspaces": [
+    "apps/web"
+  ]
+}

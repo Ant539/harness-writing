@@ -1,0 +1,493 @@
+# Paper Harness v1 API Spec
+
+This document describes the implemented FastAPI surface after Milestones 1-5 plus the first
+discovery/planning persistence foundation. The default path remains deterministic, but some
+generation endpoints can optionally call a configured LLM provider.
+
+## Conventions
+
+- IDs are UUIDs.
+- Timestamps are ISO 8601 strings.
+- Routes return JSON.
+- Route handlers are thin and delegate workflow guards to services.
+- Most invalid workflow operations currently return FastAPI `detail` strings rather than the aspirational wrapped error body.
+
+## Health
+
+### `GET /health`
+
+Returns:
+
+- `{"status": "ok"}`
+
+## Papers And Style Guides
+
+### `POST /papers`
+
+Creates a paper.
+
+Initial status:
+
+- `idea`
+
+### `GET /papers`
+
+Lists papers.
+
+### `GET /papers/{paper_id}`
+
+Gets one paper.
+
+### `PATCH /papers/{paper_id}`
+
+Updates paper metadata or status. Status changes pass the paper state machine.
+
+### `DELETE /papers/{paper_id}`
+
+Deletes a paper record.
+
+### `POST /papers/{paper_id}/transition`
+
+Explicit paper status transition.
+
+### `POST /papers/{paper_id}/style-guide`
+
+Creates a style guide record.
+
+### `GET /papers/{paper_id}/style-guide`
+
+Gets a paper style guide if present.
+
+### `PATCH /papers/style-guides/{style_guide_id}`
+
+Updates a style guide.
+
+### `DELETE /papers/style-guides/{style_guide_id}`
+
+Deletes a style guide.
+
+## Discovery And Planning
+
+### `POST /papers/{paper_id}/discovery`
+
+Persists the latest discovery snapshot for a paper.
+
+Behavior:
+
+- Stores user-goal clarification fields such as document type, audience, success criteria,
+  constraints, and current document state.
+- Supersedes the previous active discovery snapshot for the paper.
+- Keeps the route thin by delegating normalization and persistence to the planning service.
+
+### `GET /papers/{paper_id}/discovery`
+
+Returns the latest persisted discovery snapshot for the paper, or `null` if none exists yet.
+
+### `POST /papers/{paper_id}/plan`
+
+Builds and persists a structured workflow plan.
+
+Behavior:
+
+- Uses the latest discovery snapshot by default, or an explicit `discovery_id` if supplied.
+- Produces structured fields:
+  - `task_profile`
+  - `entry_strategy`
+  - `paper_plan`
+  - `section_plans`
+  - `prompt_assembly_hints`
+- Falls back to deterministic planning when no model provider is configured.
+- If a model provider is configured, the service attempts structured planner output and falls back
+  conservatively if parsing or provider execution fails.
+- Supersedes the previous active plan for the paper.
+
+### `GET /papers/{paper_id}/plan`
+
+Returns the latest persisted planning run for the paper, or `null` if no plan has been generated.
+
+## Workflow Runs
+
+### `POST /papers/{paper_id}/workflow-runs`
+
+Starts a unified workflow run and persists step records.
+
+Behavior:
+
+- Creates or reuses discovery.
+- Creates a planning run.
+- Optionally auto-executes the safest deterministic preparation steps:
+  - outline generation when the plan says outline work is needed
+  - replanning after outline generation
+  - deterministic contract generation for non-blocked sections when the section lifecycle allows it
+- Supports `dry_run=true` to persist pending execution steps without mutating paper artifacts.
+- Persists workflow-run status plus step-level status (`pending`, `running`, `completed`, `failed`,
+  `skipped`).
+
+### `GET /papers/{paper_id}/workflow-runs`
+
+Lists persisted workflow runs for a paper.
+
+### `GET /workflow-runs/{run_id}`
+
+Returns one workflow run with its persisted steps.
+
+## Outline And Section Contracts
+
+### `POST /papers/{paper_id}/generate-outline`
+
+Generates deterministic outline nodes.
+
+Behavior:
+
+- Rejects duplicate outline generation.
+- Moves paper from `idea` to `outline_ready`.
+- Creates sections as `planned`.
+
+### `GET /papers/{paper_id}/outline`
+
+Returns the paper outline.
+
+### `POST /sections`
+
+Creates an outline node with `paper_id` in the body.
+
+### `POST /papers/{paper_id}/sections`
+
+Creates an outline node under a paper.
+
+### `GET /papers/{paper_id}/sections`
+
+Lists sections for a paper.
+
+### `GET /sections/{section_id}`
+
+Gets one section.
+
+### `PATCH /sections/{section_id}`
+
+Updates section metadata or status. Status changes pass the section state machine and special guards where implemented.
+
+### `DELETE /sections/{section_id}`
+
+Deletes a section.
+
+### `POST /sections/{section_id}/transition`
+
+Explicit section status transition.
+
+### `POST /sections/{section_id}/generate-contract`
+
+Generates or regenerates a deterministic section contract.
+
+Behavior:
+
+- Creates a contract for `planned` or `contract_ready` sections.
+- Moves `planned -> contract_ready`.
+- Rejects duplicate generation unless `force=true`.
+
+### `POST /sections/{section_id}/contract`
+
+Manually creates a section contract.
+
+### `GET /sections/{section_id}/contract`
+
+Gets a section contract if present.
+
+### `GET /contracts/{contract_id}`
+
+Gets a contract.
+
+### `PATCH /contracts/{contract_id}`
+
+Updates a contract.
+
+### `DELETE /contracts/{contract_id}`
+
+Deletes a contract.
+
+## Evidence
+
+### `POST /papers/{paper_id}/sources`
+
+Registers text source material.
+
+### `GET /papers/{paper_id}/sources`
+
+Lists source material for a paper.
+
+### `GET /sources/{source_id}`
+
+Gets one source material record.
+
+### `PATCH /sources/{source_id}`
+
+Updates source material.
+
+### `DELETE /sources/{source_id}`
+
+Deletes source material.
+
+### `POST /sources/{source_id}/extract-evidence`
+
+Creates evidence items from source text by deterministic sentence splitting.
+
+### `POST /papers/{paper_id}/evidence/upload`
+
+Bulk creates evidence items.
+
+### `POST /papers/{paper_id}/evidence`
+
+Creates one evidence item.
+
+### `GET /papers/{paper_id}/evidence`
+
+Lists evidence items for a paper.
+
+### `GET /evidence/{evidence_id}`
+
+Gets one evidence item.
+
+### `PATCH /evidence/{evidence_id}`
+
+Updates an evidence item.
+
+### `DELETE /evidence/{evidence_id}`
+
+Deletes an evidence item.
+
+### `POST /sections/{section_id}/build-evidence-pack`
+
+Builds a deterministic section evidence pack.
+
+Behavior:
+
+- Requires a section contract.
+- Requires available evidence.
+- Moves `contract_ready -> evidence_ready`.
+- Rejects duplicate builds unless `force=true`.
+
+### `POST /sections/{section_id}/evidence-packs`
+
+Manually creates a section evidence pack.
+
+### `GET /sections/{section_id}/evidence-packs`
+
+Lists evidence packs for a section.
+
+### `GET /sections/{section_id}/evidence-pack`
+
+Gets the active evidence pack if present.
+
+### `GET /evidence-packs/{pack_id}`
+
+Gets one evidence pack.
+
+### `PATCH /evidence-packs/{pack_id}`
+
+Updates an evidence pack.
+
+### `POST /evidence-packs/{pack_id}/items`
+
+Adds an evidence item to a pack.
+
+### `DELETE /evidence-packs/{pack_id}/items/{evidence_id}`
+
+Removes an evidence item from a pack.
+
+### `DELETE /evidence-packs/{pack_id}`
+
+Deletes an evidence pack.
+
+## Drafting And Revision
+
+### `POST /sections/{section_id}/draft`
+
+Generates a deterministic section draft.
+
+Behavior:
+
+- Requires section status `evidence_ready`.
+- Requires an active contract.
+- Requires an active non-empty evidence pack.
+- Creates version 1 as `active`.
+- Moves section to `drafted`.
+- Rejects repeated initial generation once a current draft exists.
+
+### `GET /sections/{section_id}/drafts/current`
+
+Gets the active section draft if present.
+
+### `POST /sections/{section_id}/revise`
+
+Creates a revised draft version.
+
+Behavior:
+
+- Requires section status `reviewed` or `revision_required`.
+- Requires a current draft.
+- Requires unresolved review comments or active revision tasks.
+- Supersedes the previous active draft.
+- Creates a new active draft version.
+- Optionally resolves comments.
+- Marks selected active revision tasks `approved`.
+- Moves section to `revised`.
+
+### `POST /sections/{section_id}/drafts`
+
+Manual draft CRUD creation endpoint.
+
+### `GET /sections/{section_id}/drafts`
+
+Lists draft versions for a section.
+
+### `GET /drafts/{draft_id}`
+
+Gets one draft.
+
+### `PATCH /drafts/{draft_id}`
+
+Updates a draft.
+
+### `DELETE /drafts/{draft_id}`
+
+Deletes a draft.
+
+## Section Review And Revision Tasks
+
+### `POST /sections/{section_id}/review`
+
+Reviews the current active section draft.
+
+Behavior:
+
+- Requires section status `drafted` or `revised`.
+- Requires a current active section draft.
+- Rejects if the draft already has unresolved review comments.
+- Persists `ReviewComment` records.
+- Automatically creates one `RevisionTask` per comment.
+- Moves section to `reviewed`, then to `revision_required` if comments exist.
+
+### `POST /drafts/{draft_id}/review`
+
+Reviews a selected active section draft.
+
+### `POST /drafts/{draft_id}/reviews`
+
+Manual review comment creation endpoint.
+
+### `GET /drafts/{draft_id}/reviews`
+
+Lists review comments for one draft.
+
+### `GET /sections/{section_id}/reviews`
+
+Lists review comments across section drafts.
+
+### `GET /reviews/{review_id}`
+
+Gets one review comment.
+
+### `PATCH /reviews/{review_id}`
+
+Updates a review comment.
+
+### `POST /reviews/{review_id}/resolve`
+
+Marks a review comment resolved.
+
+### `DELETE /reviews/{review_id}`
+
+Deletes a review comment.
+
+### `POST /sections/{section_id}/revision-tasks`
+
+Manually creates a revision task.
+
+### `GET /sections/{section_id}/revision-tasks`
+
+Lists section revision tasks.
+
+### `GET /revision-tasks/{task_id}`
+
+Gets one revision task.
+
+### `PATCH /revision-tasks/{task_id}`
+
+Updates a revision task.
+
+### `DELETE /revision-tasks/{task_id}`
+
+Deletes a revision task.
+
+## Assembly, Global Review, And Export
+
+### `POST /papers/{paper_id}/assemble`
+
+Creates a versioned assembled manuscript.
+
+Behavior:
+
+- Requires at least one outline node.
+- Requires at least one usable current active section draft.
+- Traverses the outline tree in stable pre-order.
+- Includes placeholder blocks and warnings for sections without current active drafts.
+- Uses current active drafts by default.
+- If `include_unlocked=false`, only locked sections contribute usable drafts.
+- Creates a new active manuscript version and supersedes previous active versions.
+- Advances the paper to `assembly_ready` through the state machine.
+
+### `GET /papers/{paper_id}/manuscripts/current`
+
+Gets the active manuscript version if present.
+
+### `GET /papers/{paper_id}/manuscripts`
+
+Lists manuscript versions.
+
+### `GET /manuscripts/{manuscript_id}`
+
+Gets one assembled manuscript.
+
+### `POST /papers/{paper_id}/global-review`
+
+Runs deterministic global review on the current assembled manuscript.
+
+Behavior:
+
+- Requires a current active assembled manuscript.
+- Persists `ManuscriptIssue` records.
+- Returns existing issues if the current manuscript was already reviewed.
+- Checks missing draft placeholders, unresolved section review comments, missing introduction/conclusion, missing transitions, terminology drift, and duplicate sibling ordering.
+- Advances the paper to `global_review`, then `final_revision` if issues exist.
+
+### `GET /papers/{paper_id}/manuscript-issues`
+
+Lists manuscript issues for a paper.
+
+### `GET /manuscripts/{manuscript_id}/issues`
+
+Lists issues for one manuscript version.
+
+### `POST /papers/{paper_id}/export`
+
+Persists an export artifact for the current assembled manuscript.
+
+Supported formats:
+
+- `markdown`
+- `latex`
+
+Behavior:
+
+- Requires a current active assembled manuscript.
+- Markdown export returns assembled content.
+- LaTeX export is simple and deterministic; no bibliography generation.
+- Stores export content and a deterministic `data/exports/...` path reference.
+
+### `GET /papers/{paper_id}/exports`
+
+Lists export artifacts for a paper.
+
+### `GET /exports/{export_id}`
+
+Gets one export artifact.

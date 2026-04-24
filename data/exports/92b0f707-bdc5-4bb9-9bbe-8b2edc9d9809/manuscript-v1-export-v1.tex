@@ -1,0 +1,554 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{natbib}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\title{Graph Partitioning and Computation-Overhead-Aware Load Balancing for Sharded Blockchains}
+\date{}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Periodic shard reconfiguration is essential for sustaining the performance of sharded blockchains, but overloaded shards cannot be relieved aggressively without risking additional cross-shard communication. The difficulty is especially pronounced for smart-contract workloads, where transaction count is often a weak proxy for execution pressure because transactions with similar frequency may consume very different amounts of gas. This paper studies epoch-level account migration under such heterogeneous workloads. Active accounts are modeled as a temporal interaction graph whose edge weights jointly encode interaction frequency and cumulative gas usage. Based on exponential moving averages of account gas volume and shard effective capacity, the proposed method estimates shard computational pressure and formulates account assignment as a migration-budgeted optimization problem that jointly minimizes pressure variance and normalized cross-shard cut cost. Because the resulting constrained assignment problem is difficult to solve exactly at epoch boundaries, a priority-queue heuristic is developed to rank candidate migrations by both load relief and interaction preservation while updating only the affected local neighborhoods after each accepted move. Experiments in BlockEmulator with PBFT on 500,000 Ethereum Mainnet transactions show that the method narrows post-reconfiguration shard-load ratios to about 0.86--1.10, keeps shard processing times below about 600\textbackslash\{\},s, reaches about 1,800 TPS at 20\textbackslash\{\},Mbps, scales to about 3,800 TPS with 32 shards, and reduces peak mempool backlog by about 42.00\textbackslash\{\}\% at 2,500\textbackslash\{\},tx/s relative to ContribChain. Within the evaluated trace-driven setting, these results suggest that graph-guided, gas-aware reconfiguration can improve shard utilization while keeping migration-induced communication overhead under control.
+\end{abstract}
+
+\section{Introduction}\label{sec:introduction}
+
+\textbackslash\{\}noindent
+Sharding is one of the main approaches to scaling blockchain systems because it distributes state and transaction processing across multiple shards. Prior systems have shown that shard-based architectures can improve throughput while preserving decentralization and security assumptions \textbackslash\{\}cite\{luu2016secure,kokoris2018omniledger,zamani2018rapidchain,wang2019monoxide,hong2021pyramid,li2022jenga\}. In practice, however, the gain from parallel execution depends not only on how many shards are created, but also on how accounts and contracts are placed across them. When strongly interacting accounts are separated, the system incurs additional cross-shard communication and coordination cost; when computationally expensive contracts accumulate in only a few shards, those shards become stragglers and constrain end-to-end throughput.
+
+This placement problem is especially difficult in smart-contract-centric workloads. Account interactions are highly skewed and time-varying, and the execution cost of transactions can differ substantially even when their counts are similar. A reconfiguration policy that relies only on transaction volume, account popularity, or historical access frequency may therefore misjudge the true processing pressure of a shard. The resulting assignment can appear balanced at the transaction level while remaining unbalanced at the execution level. In practice, this mismatch leads to persistent local hotspots, longer shard processing time, more cross-shard transactions, and growing mempool backlog under high concurrency.
+
+The core challenge is that shard reconfiguration must satisfy two objectives that naturally conflict. Moving accounts away from overloaded shards can reduce load skew, but aggressive migration may split interaction-heavy account groups and increase cross-shard overhead. Conversely, preserving interaction locality alone can cluster high-gas accounts and contracts inside a few shards. What is needed is a reconfiguration objective that captures both sides of the problem: the heterogeneity of actual execution pressure and the communication implications of account partitioning.
+
+This paper addresses that need with a graph-partitioning and computation-overhead-aware load-balancing mechanism for sharded blockchains. For each epoch, active accounts are organized into a temporal interaction graph whose edge weights combine interaction frequency and gas usage. Account load and shard capacity are estimated with exponential moving averages so that short-lived bursts do not dominate the next reconfiguration decision. On this basis, account placement is formulated as a joint optimization problem that minimizes shard-pressure variance and normalized cross-shard cut cost under assignment and migration-budget constraints. Since the resulting formulation is difficult to solve exactly within an epoch-level reconfiguration window, the paper further develops a priority-queue-based heuristic migration algorithm that evaluates candidate moves by both load-relief benefit and interaction-preservation gain while updating only the affected local neighborhoods after each accepted migration. The intended contribution is therefore not a new sharding protocol, but a reconfiguration model in which interaction locality and gas-based execution burden are represented within the same decision objective and followed by one practical migration policy.
+
+The main contributions of this paper are summarized as follows.
+\textbackslash\{\}begin\{itemize\}
+    \textbackslash\{\}item A temporal account-interaction model is developed for epoch-level reconfiguration, in which edge weights jointly encode interaction frequency and cumulative gas consumption so that communication intensity and execution overhead are represented in a single graph structure.
+    \textbackslash\{\}item A computation-aware shard-pressure model is introduced by combining exponential moving averages of account gas volume and shard effective capacity, and the resulting assignment problem is formulated as a joint objective over load variance and normalized cross-shard cut cost.
+    \textbackslash\{\}item A practical heuristic migration algorithm is designed for the resulting constrained assignment problem. The algorithm uses a priority queue and local differential evaluation to rank candidate migrations efficiently and to avoid expensive global recomputation after each accepted move.
+    \textbackslash\{\}item A trace-driven empirical evaluation on 500,000 Ethereum Mainnet transactions is conducted in BlockEmulator to examine load distribution, shard processing time, throughput, and mempool backlog under multiple bandwidth, workload, and shard-count settings.
+\textbackslash\{\}end\{itemize\}
+
+\section{Related Work}\label{sec:related-work}
+
+Research on sharded blockchains can be broadly grouped into protocol architecture, state assignment and balancing, and cross-shard coordination optimization. Early sharding systems, including the secure sharding protocol of Luu et al., OmniLedger, RapidChain, and Monoxide, established the feasibility of scaling blockchain execution through partitioned state and parallel processing \textbackslash\{\}cite\{luu2016secure,kokoris2018omniledger,zamani2018rapidchain,wang2019monoxide\}. Later systems such as Pyramid and Jenga further explored layered architectures and more effective support for contract execution \textbackslash\{\}cite\{hong2021pyramid,li2022jenga\}. These studies show that sharding can improve system capacity, but they also make clear that performance depends heavily on how state is partitioned and reconfigured over time.
+
+The second line of work studies state assignment and runtime balancing. Okanami et al. investigated load balancing and later extended the idea to protocol-level and wallet-level account assignment \textbackslash\{\}cite\{okanami2020load,okanami2022load\}. Li et al. studied state sharding with the goal of improving scalability while maintaining load balance across shards \textbackslash\{\}cite\{li2022achieving\}. LB-Chain made account migration more explicit as a runtime balancing mechanism \textbackslash\{\}cite\{li2023lb\}. These studies are closely related to the present paper because they recognize that static assignment is insufficient under changing workloads. Their common limitation, however, is that load is usually approximated by coarse indicators such as transaction counts, account access frequency, or aggregate historical activity. Such proxies are useful, but they do not directly capture the heterogeneity of smart-contract execution cost or the fact that interaction preservation and execution balancing must be handled together during reconfiguration. In particular, LB-Chain is the closest migration baseline in spirit, whereas the present work differs by driving migration with one graph model that jointly encodes interaction structure and gas-based execution burden rather than ranking candidates from communication or load indicators alone.
+
+The third line of work focuses on cross-shard overhead and system stress. BrokerChain reduces the cost of account/balance-based state sharding by refining cross-shard transaction handling \textbackslash\{\}cite\{huang2022brokerchain\}. Presto optimizes cross-shard transaction execution in sharded architectures \textbackslash\{\}cite\{ding2024presto\}. ContribChain incorporates node-contribution awareness into stress-balanced sharding \textbackslash\{\}cite\{huang2025contribchain\}. These systems improve important parts of the sharding pipeline, but their primary focus is not the joint assignment problem studied here, namely how to rebalance accounts so that shard pressure is reduced without sacrificing interaction locality.
+
+This paper sits at the intersection of these lines of work. Similar to prior balancing methods, it treats reconfiguration as an account-placement problem; similar to cross-shard optimization work, it explicitly accounts for the cost of cutting interacting account groups. The key difference is that the reconfiguration decision itself is driven by a graph that encodes both interaction structure and gas-based execution pressure, and the assignment is optimized with one migration-budgeted objective over load variance and cross-shard cost. The contribution is therefore not a new sharding protocol, but a more faithful and practically targeted reconfiguration model for smart-contract workloads, especially when transaction counts alone are a weak proxy for execution burden.
+
+\section{System Model and Problem Formulation}\label{sec:system-model-and-problem-formulation}
+
+
+
+\subsection{Notation and Active Account Set}\label{sec:notation-and-active-account-set}
+
+Consider a sharded blockchain system with \$K\$ shards. Let \$t\$ denote the current epoch and let \$B\emph{t\$ denote the set of confirmed transactions in that epoch. Here, \$B}t\$ includes both successfully executed and reverted on-chain transactions, because reverted smart-contract calls still consume gas and occupy execution resources. Let \$\textbackslash\{\}tau\$ be the sliding-window length used to identify active accounts, let \$V^t\$ be the active-account set, let \$G^t=(V^t,E^t,M^t)\$ be the temporal account interaction graph, and let \$X^t=[x\emph{\{j,i\}^t]\$ be the account-to-shard assignment matrix. For later use, \$g}j^t\$ denotes the observed gas volume involving account \$j\$ in epoch \$t\$, \$w\emph{j^t\$ denotes its predicted execution load, \$L}i^t\$ denotes the aggregate predicted load assigned to shard \$i\$, \$c\emph{i^t\$ denotes the effective capacity estimate of shard \$i\$, \$P}i^t\$ denotes the resulting shard pressure, and \$B\_\{\textbackslash\{\}max\}\$ denotes the migration budget at one epoch boundary.
+
+For an account \$j\$, define \$\textbackslash\{\}mathrm\{TxCount\}(j,s)\$ as the number of confirmed transactions involving account \$j\$ in epoch \$s\$. An account is regarded as active in epoch \$t\$ if it participates in at least one confirmed transaction within a sliding window of length \$\textbackslash\{\}tau\$:
+\textbackslash\{\}begin\{equation\}
+V^t=\textbackslash\{\}\{j\textbackslash\{\}mid \textbackslash\{\}exists s\textbackslash\{\}in [t-\textbackslash\{\}tau+1,t],\textbackslash\{\} \textbackslash\{\}mathrm\{TxCount\}(j,s)\textbackslash\{\}ge 1\textbackslash\{\}\}.
+\textbackslash\{\}end\{equation\}
+
+Accounts that remain inactive throughout the whole window are pruned as cold accounts. The window length \$\textbackslash\{\}tau\$ therefore controls a tradeoff between retaining longer interaction history and keeping the graph compact enough for epoch-level reconfiguration.
+
+\subsection{Temporal Account Interaction Graph}\label{sec:temporal-account-interaction-graph}
+
+The account interaction graph at epoch \$t\$ is defined as
+\textbackslash\{\}begin\{equation\}
+G^t=(V^t,E^t,M^t),
+\textbackslash\{\}end\{equation\}
+where \$E^t\$ contains account pairs that interact within the sliding window \$[t-\textbackslash\{\}tau+1,t]\$, and \$M^t=\textbackslash\{\}\{e\_\{u,v\}^t\textbackslash\{\}mid (u,v)\textbackslash\{\}in E^t\textbackslash\{\}\}\$ stores the corresponding edge weights. An undirected graph is used because the reconfiguration objective is to preserve interaction locality between account pairs, rather than to distinguish which side initiated an individual transfer or contract call.
+
+For any account pair \$u,v\textbackslash\{\}in V^t\$, define the cumulative interaction frequency and cumulative gas volume over the same sliding window as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}mathrm\{Freq\}\_\{u,v\}^t
+\&=
+\textbackslash\{\}sum\_\{s=t-\textbackslash\{\}tau+1\}^\{t\}
+\textbackslash\{\}left|
+\textbackslash\{\}left\textbackslash\{\}\{
+tx\textbackslash\{\}in B\_s \textbackslash\{\},\textbackslash\{\}middle|\textbackslash\{\},
+\textbackslash\{\}substack\{
+(tx.from=u \textbackslash\{\}land tx.to=v)\textbackslash\{\}\textbackslash\{\}
+\{\}\textbackslash\{\}lor(tx.from=v \textbackslash\{\}land tx.to=u)
+\}
+\textbackslash\{\}right\textbackslash\{\}\}
+\textbackslash\{\}right|.
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+and
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}mathrm\{Vol\}\_\{u,v\}^t
+\&=
+\textbackslash\{\}sum\_\{s=t-\textbackslash\{\}tau+1\}^\{t\}
+\textbackslash\{\}sum\_\{\textbackslash\{\}substack\{
+tx\textbackslash\{\}in B\_s:\textbackslash\{\}\textbackslash\{\}
+(tx.from=u \textbackslash\{\}land tx.to=v)\textbackslash\{\}\textbackslash\{\}
+\{\}\textbackslash\{\}lor(tx.from=v \textbackslash\{\}land tx.to=u)
+\}\}
+tx.gasUsed.
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+
+An undirected edge \$(u,v)\textbackslash\{\}in E^t\$ exists if and only if \$\textbackslash\{\}mathrm\{Freq\}\_\{u,v\}^t>0\$. Since both interaction frequency and gas volume are typically long-tailed in blockchain workloads, a logarithmic transform is first applied:
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Freq\}\}\emph{\{u,v\}^t=\textbackslash\{\}ln(1+\textbackslash\{\}mathrm\{Freq\}}\{u,v\}^t),
+\textbackslash\{\}end\{equation\}
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Vol\}\}\emph{\{u,v\}^t=\textbackslash\{\}ln(1+\textbackslash\{\}mathrm\{Vol\}}\{u,v\}^t).
+\textbackslash\{\}end\{equation\}
+
+To keep the two components on comparable scales, they are normalized as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}widetilde\{\textbackslash\{\}mathrm\{Freq\}\}\_\{u,v\}^t
+=
+\textbackslash\{\}frac\{\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Freq\}\}\_\{u,v\}^t\}
+\{\textbackslash\{\}max\emph{\{(a,b)\textbackslash\{\}in E^t\}\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Freq\}\}}\{a,b\}^t+\textbackslash\{\}varepsilon\},
+\textbackslash\{\}end\{equation\}
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}widetilde\{\textbackslash\{\}mathrm\{Vol\}\}\_\{u,v\}^t
+=
+\textbackslash\{\}frac\{\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Vol\}\}\_\{u,v\}^t\}
+\{\textbackslash\{\}max\emph{\{(a,b)\textbackslash\{\}in E^t\}\textbackslash\{\}widehat\{\textbackslash\{\}mathrm\{Vol\}\}}\{a,b\}^t+\textbackslash\{\}varepsilon\},
+\textbackslash\{\}end\{equation\}
+where \$\textbackslash\{\}varepsilon>0\$ is a small constant used to avoid division by zero. The final edge weight is then defined as
+\textbackslash\{\}begin\{equation\}
+e\_\{u,v\}^t
+=
+\textbackslash\{\}alpha \textbackslash\{\}widetilde\{\textbackslash\{\}mathrm\{Freq\}\}\_\{u,v\}^t
++
+(1-\textbackslash\{\}alpha)\textbackslash\{\}widetilde\{\textbackslash\{\}mathrm\{Vol\}\}\_\{u,v\}^t,
+\textbackslash\{\}qquad
+\textbackslash\{\}alpha\textbackslash\{\}in[0,1].
+\textbackslash\{\}end\{equation\}
+
+Thus, each edge jointly reflects communication intensity and execution-related interaction burden. When \$\textbackslash\{\}alpha\$ is larger, the graph emphasizes interaction frequency more strongly; when \$\textbackslash\{\}alpha\$ is smaller, it places more weight on gas-aware execution significance.
+
+\subsection{Computation-Aware Load and Shard Pressure Estimation}\label{sec:computation-aware-load-and-shard-pressure-estimation}
+
+Let \$X^t=[x\_\{j,i\}^t]\textbackslash\{\}in\textbackslash\{\}\{0,1\textbackslash\{\}\}^\{|V^t|\textbackslash\{\}times K\}\$ denote the account-to-shard assignment matrix in epoch \$t\$, where
+\textbackslash\{\}begin\{equation\}
+x\_\{j,i\}^t
+=
+\textbackslash\{\}begin\{cases\}
+1, \& \textbackslash\{\}text\{if account \} j \textbackslash\{\}text\{ is assigned to shard \} i,\textbackslash\{\}\textbackslash\{\}
+0, \& \textbackslash\{\}text\{otherwise\}.
+\textbackslash\{\}end\{cases\}
+\textbackslash\{\}end\{equation\}
+
+For convenience, let
+\textbackslash\{\}begin\{equation\}
+S^t(j)=i
+\textbackslash\{\}iff
+x\_\{j,i\}^t=1,
+\textbackslash\{\}end\{equation\}
+that is, \$S^t(j)\$ denotes the shard currently assigned to account \$j\$.
+
+Because shard load may fluctuate sharply from one epoch to the next, direct use of raw observations can amplify short-lived bursts and lead to unstable reconfiguration. Let
+\textbackslash\{\}begin\{equation\}
+g\_j^t
+=
+\textbackslash\{\}sum\_\{\textbackslash\{\}substack\{
+tx\textbackslash\{\}in B\_t:\textbackslash\{\}\textbackslash\{\}
+tx.from=j \textbackslash\{\}lor tx.to=j
+\}\}
+tx.gasUsed
+\textbackslash\{\}end\{equation\}
+denote the observed gas volume involving account \$j\$ in epoch \$t\$. At the beginning of epoch \$t\$, the system has observed data only up to epoch \$t-1\$, so the predicted account load is estimated by an exponential moving average:
+\textbackslash\{\}begin\{equation\}
+w\_j^t
+=
+\textbackslash\{\}rho g\_j^\{t-1\}
++
+(1-\textbackslash\{\}rho)w\_j^\{t-1\},
+\textbackslash\{\}qquad
+\textbackslash\{\}rho\textbackslash\{\}in(0,1],
+\textbackslash\{\}end\{equation\}
+with initialization \$w\emph{j^0=g}j^0\$. Thus, \$w\_j^t\$ is a prediction for the next reconfiguration round rather than a quantity computed from the still-unobserved workload of epoch \$t\$ itself.
+
+The aggregate predicted load assigned to shard \$i\$ is then
+\textbackslash\{\}begin\{equation\}
+L\_i^t
+=
+\textbackslash\{\}sum\emph{\{j\textbackslash\{\}in V^t\} x}\{j,i\}^t w\_j^t.
+\textbackslash\{\}end\{equation\}
+
+Similarly, let \$B\emph{i^\{t-1\}\$ be the number of blocks produced by shard \$i\$ in the previous epoch and let \$G}\{\textbackslash\{\}max\}\$ be the block gas limit. Then \$B\emph{i^\{t-1\}G}\{\textbackslash\{\}max\}\$ serves as an observable proxy for the processing capacity delivered by shard \$i\$ in the previous epoch. To keep the capacity estimate both smooth and conservative, the effective capacity of shard \$i\$ is estimated as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+c\_i^t
+\&=
+\textbackslash\{\}eta\textbackslash\{\}left(
+\textbackslash\{\}rho\emph{c B}i^\{t-1\}G\_\{\textbackslash\{\}max\}
++
+(1-\textbackslash\{\}rho\emph{c)c}i^\{t-1\}
+\textbackslash\{\}right),\textbackslash\{\}\textbackslash\{\}
+\&\textbackslash\{\}rho\_c\textbackslash\{\}in(0,1],\textbackslash\{\} \textbackslash\{\}eta\textbackslash\{\}in(0,1].
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+
+Here, \$\textbackslash\{\}rho\emph{c\$ is the smoothing factor for capacity estimation and \$\textbackslash\{\}eta\$ is a conservative scaling coefficient. With initialization \$c}i^0=\textbackslash\{\}eta B\emph{i^0 G}\{\textbackslash\{\}max\}\$, the corresponding shard pressure is defined as
+\textbackslash\{\}begin\{equation\}
+P\_i^t
+=
+\textbackslash\{\}frac\{L\emph{i^t\}\{c}i^t+\textbackslash\{\}varepsilon\}.
+\textbackslash\{\}end\{equation\}
+
+Let the average shard pressure be
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}bar P^t
+=
+\textbackslash\{\}frac\{1\}\{K\}\textbackslash\{\}sum\emph{\{i=1\}^\{K\}P}i^t.
+\textbackslash\{\}end\{equation\}
+
+This pressure formulation reflects the ratio between predicted workload and effective shard processing ability. It is therefore more informative for smart-contract-centric workloads than transaction count alone, while still remaining lightweight enough for epoch-level online reconfiguration.
+
+\subsection{Migration-Budgeted Optimization Objective}\label{sec:migration-budgeted-optimization-objective}
+
+The reconfiguration objective is to jointly reduce shard-pressure imbalance and cross-shard interaction cost. To capture the first aspect, define the shard-pressure variance as
+\textbackslash\{\}begin\{equation\}
+F\_\{\textbackslash\{\}mathrm\{load\}\}(X^t)
+=
+\textbackslash\{\}frac\{1\}\{K\}\textbackslash\{\}sum\emph{\{i=1\}^\{K\}(P}i^t-\textbackslash\{\}bar P^t)^2.
+\textbackslash\{\}end\{equation\}
+
+This term penalizes execution-side skew across shards. Compared with a direct max-pressure objective, the variance form is smoother and more suitable for local differential evaluation during online migration.
+
+To quantify the cost of cross-shard communication in a form directly tied to the binary assignment matrix, the weighted cross-shard cut cost is
+\textbackslash\{\}begin\{equation\}
+F\_\{\textbackslash\{\}mathrm\{cross\}\}(X^t)
+=
+\textbackslash\{\}sum\_\{(u,v)\textbackslash\{\}in E^t\}
+e\_\{u,v\}^t
+\textbackslash\{\}left(
+1-\textbackslash\{\}sum\emph{\{i=1\}^\{K\}x}\{u,i\}^t x\_\{v,i\}^t
+\textbackslash\{\}right).
+\textbackslash\{\}end\{equation\}
+
+Because each account is assigned to exactly one shard, the term \$1-\textbackslash\{\}sum\emph{\{i=1\}^\{K\}x}\{u,i\}^t x\_\{v,i\}^t\$ is \$0\$ when \$u\$ and \$v\$ are placed on the same shard and \$1\$ otherwise. Let
+\textbackslash\{\}begin\{equation\}
+W\_\{\textbackslash\{\}mathrm\{total\}\}^t
+=
+\textbackslash\{\}sum\emph{\{(u,v)\textbackslash\{\}in E^t\} e}\{u,v\}^t
+\textbackslash\{\}end\{equation\}
+denote the total edge weight of the interaction graph. The normalized cross-shard cost is then
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}widetilde F\_\{\textbackslash\{\}mathrm\{cross\}\}(X^t)
+\&=
+\textbackslash\{\}frac\{F\_\{\textbackslash\{\}mathrm\{cross\}\}(X^t)\}
+\{W\_\{\textbackslash\{\}mathrm\{total\}\}^t+\textbackslash\{\}varepsilon\}.
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+
+The normalization keeps the cut term comparable across epochs with different graph sizes and total interaction mass.
+
+The joint objective function is
+\textbackslash\{\}begin\{equation\}
+J(X^t)
+=
+\textbackslash\{\}lambda F\_\{\textbackslash\{\}mathrm\{load\}\}(X^t)
++
+(1-\textbackslash\{\}lambda)\textbackslash\{\}widetilde F\_\{\textbackslash\{\}mathrm\{cross\}\}(X^t),
+\textbackslash\{\}qquad
+\textbackslash\{\}lambda\textbackslash\{\}in[0,1].
+\textbackslash\{\}end\{equation\}
+
+The parameter \$\textbackslash\{\}lambda\$ determines the tradeoff between pressure balancing and interaction preservation.
+
+The optimization is subject to the following constraints:
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}sum\emph{\{i=1\}^\{K\}x}\{j,i\}^t=1,
+\textbackslash\{\}qquad
+\textbackslash\{\}forall j\textbackslash\{\}in V^t,
+\textbackslash\{\}end\{equation\}
+\textbackslash\{\}begin\{equation\}
+x\_\{j,i\}^t\textbackslash\{\}in\textbackslash\{\}\{0,1\textbackslash\{\}\},
+\textbackslash\{\}qquad
+\textbackslash\{\}forall j\textbackslash\{\}in V^t,\textbackslash\{\} \textbackslash\{\}forall i\textbackslash\{\}in\textbackslash\{\}\{1,\textbackslash\{\}dots,K\textbackslash\{\}\},
+\textbackslash\{\}end\{equation\}
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}sum\emph{\{j\textbackslash\{\}in V^t\}\textbackslash\{\}sum}\{i=1\}^\{K\}
+\textbackslash\{\}left|x\emph{\{j,i\}^t-x}\{j,i\}^\{t-1\}\textbackslash\{\}right|
+\textbackslash\{\}le 2B\_\{\textbackslash\{\}max\}.
+\textbackslash\{\}end\{equation\}
+
+The first constraint enforces one-account-one-shard assignment, the second preserves binary decision variables, and the third limits how many accounts may be migrated at one reconfiguration boundary. Because each migrated account changes exactly two entries in its one-hot assignment row, the last inequality is equivalent to bounding the number of migrated accounts by \$B\_\{\textbackslash\{\}max\}\$.
+
+The complete optimization problem is written explicitly as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}min\_\{X^t\}\textbackslash\{\}quad
+\& J(X^t) \textbackslash\{\}\textbackslash\{\}
+\textbackslash\{\}text\{s.t.\}\textbackslash\{\}quad
+\& \textbackslash\{\}sum\emph{\{i=1\}^\{K\}x}\{j,i\}^t=1,
+\&\& \textbackslash\{\}forall j\textbackslash\{\}in V^t, \textbackslash\{\}\textbackslash\{\}
+\& x\_\{j,i\}^t\textbackslash\{\}in\textbackslash\{\}\{0,1\textbackslash\{\}\},
+\&\& \textbackslash\{\}forall j\textbackslash\{\}in V^t, \textbackslash\{\}\textbackslash\{\}
+\& \&\& \textbackslash\{\}forall i\textbackslash\{\}in\textbackslash\{\}\{1,\textbackslash\{\}dots,K\textbackslash\{\}\}, \textbackslash\{\}\textbackslash\{\}
+\& \textbackslash\{\}sum\emph{\{j\textbackslash\{\}in V^t\}\textbackslash\{\}sum}\{i=1\}^\{K\}
+\textbackslash\{\}left|x\emph{\{j,i\}^t-x}\{j,i\}^\{t-1\}\textbackslash\{\}right| \textbackslash\{\}\textbackslash\{\}
+\& \textbackslash\{\}le 2B\_\{\textbackslash\{\}max\}.
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+
+Because the objective combines discrete assignment variables with a quadratic load term and a graph-cut term, the resulting problem is a constrained 0-1 quadratic program and is difficult to solve exactly at epoch boundaries.
+
+\section{Priority-Queue-Based Heuristic Migration}\label{sec:priority-queue-based-heuristic-migration}
+
+
+
+\subsection{Migration Benefit and Local Differential Cost}\label{sec:migration-benefit-and-local-differential-cost}
+
+To solve the above optimization problem efficiently, a heuristic account-migration algorithm is adopted instead of attempting exact optimization. Let \$N(j)\$ denote the graph neighborhood of \$j\$ in \$G^t\$. The algorithm first identifies overloaded shards with a tolerance parameter \$\textbackslash\{\}delta>0\$:
+\textbackslash\{\}begin\{equation\}
+H^t
+=
+\textbackslash\{\}left\textbackslash\{\}\{
+i\textbackslash\{\}in\textbackslash\{\}\{1,\textbackslash\{\}dots,K\textbackslash\{\}\}\textbackslash\{\}mid P\_i^t>(1+\textbackslash\{\}delta)\textbackslash\{\}bar P^t
+\textbackslash\{\}right\textbackslash\{\}\},
+\textbackslash\{\}end\{equation\}
+and defines the admissible destination set as
+\textbackslash\{\}begin\{equation\}
+L^t
+=
+\textbackslash\{\}left\textbackslash\{\}\{
+i\textbackslash\{\}in\textbackslash\{\}\{1,\textbackslash\{\}dots,K\textbackslash\{\}\}\textbackslash\{\}mid P\_i^t\textbackslash\{\}le (1+\textbackslash\{\}delta)\textbackslash\{\}bar P^t
+\textbackslash\{\}right\textbackslash\{\}\}.
+\textbackslash\{\}end\{equation\}
+
+For any shard \$i\$, define the interaction strength between account \$j\$ and shard \$i\$ as
+\textbackslash\{\}begin\{equation\}
+E(j,i)
+=
+\textbackslash\{\}sum\emph{\{k\textbackslash\{\}in N(j),\textbackslash\{\} S^t(k)=i\} e}\{j,k\}^t.
+\textbackslash\{\}end\{equation\}
+
+For a candidate account \$j\$ currently placed on an overloaded shard \$i\emph{h=S^t(j)\textbackslash\{\}in H^t\$ and a destination shard \$i}l\textbackslash\{\}in L^t\$, the heuristic migration score is defined as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}mathrm\{Score\}(j,i\emph{h\textbackslash\{\}rightarrow i}l)
+\&=
+\textbackslash\{\}theta\textbackslash\{\}cdot\textbackslash\{\}frac\{w\emph{j^t\}\{c}\{i\_h\}^t+\textbackslash\{\}varepsilon\} \textbackslash\{\}\textbackslash\{\}
+\&\textbackslash\{\}quad+
+(1-\textbackslash\{\}theta)\textbackslash\{\}cdot
+\textbackslash\{\}frac\{E(j,i\emph{l)-E(j,i}h)\}\{W\_\{\textbackslash\{\}mathrm\{total\}\}^t+\textbackslash\{\}varepsilon\}.
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+where \$\textbackslash\{\}theta\textbackslash\{\}in[0,1]\$ and \$W\_\{\textbackslash\{\}mathrm\{total\}\}^t\$ is given above. The first term measures the expected pressure-relief benefit on the overloaded source shard, whereas the second term measures the expected locality gain. Separating \$\textbackslash\{\}theta\$ from the objective weight \$\textbackslash\{\}lambda\$ avoids conflating heuristic ranking with the final optimization target.
+
+For each candidate account \$j\$, let \$i\_h=S^t(j)\$ denote its current shard. The best admissible destination is
+\textbackslash\{\}begin\{equation\}
+i\_l^*(j)
+=
+\textbackslash\{\}arg\textbackslash\{\}max\emph{\{i\textbackslash\{\}in L^t\}\textbackslash\{\}mathrm\{Score\}(j,i}h\textbackslash\{\}rightarrow i).
+\textbackslash\{\}end\{equation\}
+
+The score is used only for ranking. Before committing a migration, the algorithm evaluates the actual local objective change:
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}Delta J
+=
+\textbackslash\{\}lambda \textbackslash\{\}Delta F\_\{\textbackslash\{\}mathrm\{load\}\}
++
+(1-\textbackslash\{\}lambda)\textbackslash\{\}Delta \textbackslash\{\}widetilde F\_\{\textbackslash\{\}mathrm\{cross\}\}.
+\textbackslash\{\}end\{equation\}
+
+Suppose account \$j\$ moves from \$i\emph{h\$ to \$i}l\$. Then only the source-shard and destination-shard loads change:
+\textbackslash\{\}begin\{equation\}
+L\emph{\{i}h\}^\{t\textbackslash\{\}prime\}=L\emph{\{i}h\}^t-w\_j^t,
+\textbackslash\{\}qquad
+L\emph{\{i}l\}^\{t\textbackslash\{\}prime\}=L\emph{\{i}l\}^t+w\_j^t.
+\textbackslash\{\}end\{equation\}
+
+This implies
+\textbackslash\{\}begin\{equation\}
+P\emph{\{i}h\}^\{t\textbackslash\{\}prime\}
+=
+P\emph{\{i}h\}^t-\textbackslash\{\}frac\{w\emph{j^t\}\{c}\{i\_h\}^t+\textbackslash\{\}varepsilon\},
+\textbackslash\{\}qquad
+P\emph{\{i}l\}^\{t\textbackslash\{\}prime\}
+=
+P\emph{\{i}l\}^t+\textbackslash\{\}frac\{w\emph{j^t\}\{c}\{i\_l\}^t+\textbackslash\{\}varepsilon\},
+\textbackslash\{\}end\{equation\}
+and
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}bar P^\{t\textbackslash\{\}prime\}
+=
+\textbackslash\{\}bar P^t
++
+\textbackslash\{\}frac\{1\}\{K\}
+\textbackslash\{\}left(
+\textbackslash\{\}frac\{w\emph{j^t\}\{c}\{i\_l\}^t+\textbackslash\{\}varepsilon\}
+-
+\textbackslash\{\}frac\{w\emph{j^t\}\{c}\{i\_h\}^t+\textbackslash\{\}varepsilon\}
+\textbackslash\{\}right).
+\textbackslash\{\}end\{equation\}
+
+Using the definition of \$F\_\{\textbackslash\{\}mathrm\{load\}\}(X^t)\$, the load-term change can be computed locally as
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}Delta F\_\{\textbackslash\{\}mathrm\{load\}\}
+\&=
+\textbackslash\{\}frac\{1\}\{K\}\textbackslash\{\}Big[
+(P\emph{\{i}h\}^\{t\textbackslash\{\}prime\}-\textbackslash\{\}bar P^\{t\textbackslash\{\}prime\})^2 \textbackslash\{\}\textbackslash\{\}
+\&\textbackslash\{\}qquad+
+(P\emph{\{i}l\}^\{t\textbackslash\{\}prime\}-\textbackslash\{\}bar P^\{t\textbackslash\{\}prime\})^2 \textbackslash\{\}\textbackslash\{\}
+\&\textbackslash\{\}qquad-
+(P\emph{\{i}h\}^\{t\}-\textbackslash\{\}bar P^\{t\})^2
+-
+(P\emph{\{i}l\}^\{t\}-\textbackslash\{\}bar P^\{t\})^2
+\textbackslash\{\}Big].
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+
+For the cut term, only edges incident to \$j\$ can change their contribution. Therefore,
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}begin\{aligned\}
+\textbackslash\{\}Delta F\_\{\textbackslash\{\}mathrm\{cross\}\}
+\&=
+\textbackslash\{\}sum\emph{\{k\textbackslash\{\}in N(j),\textbackslash\{\} S^t(k)=i}h\} e\_\{j,k\}^t \textbackslash\{\}\textbackslash\{\}
+\&\textbackslash\{\}quad-
+\textbackslash\{\}sum\emph{\{k\textbackslash\{\}in N(j),\textbackslash\{\} S^t(k)=i}l\} e\_\{j,k\}^t \textbackslash\{\}\textbackslash\{\}
+\&=
+E(j,i\emph{h)-E(j,i}l).
+\textbackslash\{\}end\{aligned\}
+\textbackslash\{\}end\{equation\}
+which gives
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}Delta \textbackslash\{\}widetilde F\_\{\textbackslash\{\}mathrm\{cross\}\}
+=
+\textbackslash\{\}frac\{\textbackslash\{\}Delta F\emph{\{\textbackslash\{\}mathrm\{cross\}\}\}\{W}\{\textbackslash\{\}mathrm\{total\}\}^t+\textbackslash\{\}varepsilon\}.
+\textbackslash\{\}end\{equation\}
+
+A candidate move is accepted only when
+\textbackslash\{\}begin\{equation\}
+\textbackslash\{\}Delta J<0.
+\textbackslash\{\}end\{equation\}
+
+Thus, the score is used for efficient candidate ranking, whereas the final acceptance decision is governed by strict local decrease of the actual objective. This preserves a monotonic local-improvement direction even though the overall search remains heuristic.
+
+\subsection{Priority-Queue Migration Procedure}\label{sec:priority-queue-migration-procedure}
+
+The algorithm uses a max-heap to maintain candidate accounts ordered by migration benefit. Its execution at each epoch boundary can be summarized as follows.
+
+\textbackslash\{\}begin\{enumerate\}
+\textbackslash\{\}item Compute the predicted account loads \$w\emph{j^t\$, shard capacities \$c}i^t\$, shard pressures \$P\_i^t\$, and then identify the overloaded set \$H^t\$ and admissible set \$L^t\$.
+\textbackslash\{\}item For each account on shards in \$H^t\$, enumerate admissible destinations in \$L^t\$, compute the best destination by the above score, and insert the resulting candidate move into the max-heap.
+\textbackslash\{\}item Repeatedly extract the candidate with the largest score, evaluate its local objective change, and accept the migration only when it satisfies \$\textbackslash\{\}Delta J<0\$ and the migration budget has not been exhausted.
+\textbackslash\{\}item After each accepted migration, update the shard loads, shard pressures, local cut contributions, and the heap keys of affected neighboring candidates, and then continue the search with the refreshed local state.
+\textbackslash\{\}end\{enumerate\}
+
+Because the budget constraint bounds the total number of changed one-hot assignment entries by \$2B\emph{\{\textbackslash\{\}max\}\$, it is equivalent to allowing at most \$B}\{\textbackslash\{\}max\}\$ account migrations at one reconfiguration boundary. This local-update strategy avoids a full scan of all accounts after every move and confines recomputation to the neighborhoods that actually changed. The procedure stops when the migration budget is exhausted, when the heap becomes empty, when no remaining candidate yields \$\textbackslash\{\}Delta J<0\$, or when \$H^t=\textbackslash\{\}emptyset\$.
+
+\subsection{Complexity Analysis}\label{sec:complexity-analysis}
+
+Let \$N\$ be the number of active accounts, let \$\textbackslash\{\}bar d\$ be the average degree of the interaction graph, and let \$M\textbackslash\{\}le B\_\{\textbackslash\{\}max\}\$ be the number of accepted migrations. Constructing the candidate set and initializing the heap requires local interaction scans over candidate neighborhoods and therefore costs \$O(N\textbackslash\{\}bar d)\$ in the worst case. Each accepted migration changes only the source shard, the destination shard, and the neighborhood of the migrated account. The local cut-difference computation is \$O(\textbackslash\{\}bar d)\$, while refreshing affected candidate scores and maintaining the heap costs \$O(\textbackslash\{\}bar d\textbackslash\{\}log N)\$. Therefore, the total time complexity is
+\textbackslash\{\}begin\{equation\}
+O(N\textbackslash\{\}bar d + M\textbackslash\{\}bar d \textbackslash\{\}log N).
+\textbackslash\{\}end\{equation\}
+
+This complexity is compatible with epoch-level online reconfiguration because recomputation is confined to affected local neighborhoods rather than the full graph after every accepted move.
+
+\section{Experimental Evaluation}\label{sec:experimental-evaluation}
+
+
+
+\subsection{Experimental Setup}\label{sec:experimental-setup}
+
+The evaluation is conducted in the open-source sharding emulator BlockEmulator with PBFT as the intra-shard consensus protocol. All test nodes are deployed on a single physical machine equipped with an Intel Core i5-14600KF processor, 32\textbackslash\{\},GB memory, and Ubuntu 20.04 LTS. To emulate a wide-area network environment, the per-node bandwidth is limited to 20\textbackslash\{\},Mbps, the block interval is set to 3\textbackslash\{\},s, the block capacity is fixed at 2,000 transactions, and the reconfiguration gap is set to 100 consensus rounds.
+
+To reflect realistic digital-asset workloads, 500,000 transactions are extracted from Ethereum Mainnet traces spanning block heights 0 to 999,999. Unless otherwise stated, the default injection rate is 2,000\textbackslash\{\},tx/s. The proposed method is compared against representative sharding baselines, including ContribChain~\textbackslash\{\}cite\{huang2025contribchain\}, LB-Chain~\textbackslash\{\}cite\{li2023lb\}, BrokerChain~\textbackslash\{\}cite\{huang2022brokerchain\}, Presto~\textbackslash\{\}cite\{ding2024presto\}, and CLPA. The load-distribution and shard-time comparisons are reported against ContribChain and LB-Chain, the throughput sweeps are reported against ContribChain, BrokerChain, and CLPA, and the mempool analysis is reported against ContribChain and Presto, consistent with the stored plots for each metric. All reported comparisons use the same emulator configuration and workload trace so that the observed differences reflect the effect of the balancing mechanism rather than different runtime settings. LB-Chain is the closest account-migration baseline, whereas BrokerChain and Presto primarily contextualize cross-shard coordination behavior and ContribChain contextualizes stress-aware sharding. The comparisons should therefore be read as controlled end-to-end system comparisons in one common environment rather than as a claim that all baselines solve exactly the same optimization problem.
+
+The current evaluation should therefore be read as a trace-driven comparison under one controlled runtime configuration rather than as a multi-run robustness study.
+The evaluation focuses on shard-load distribution, shard processing time, system throughput, and mempool backlog under different resource and concurrency settings.
+
+\subsection{Load Balancing Behavior}\label{sec:load-balancing-behavior}
+
+Fig.~1 shows the evolution of shard-load distributions over five consecutive reconfiguration epochs. The heatmap should be read as evidence that the method reduces execution-side skew rather than merely redistributing transaction counts. Several baseline methods still exhibit obvious local overload in the early rounds, and some shards exceed a load ratio of 2.0, which is consistent with balancing criteria that do not fully distinguish cheap interactions from gas-intensive contract execution. By contrast, the proposed method keeps the maximum load ratio around 1.4 and gradually narrows the shard-load range to approximately 0.86--1.10 after reconfiguration. The result indicates not only a lower peak pressure, but also a faster convergence toward a more even shard-level operating regime before straggler shards can dominate later rounds.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/heatmap.png\}
+    \textbackslash\{\}captionof\{figure\}\{Heatmap comparison of shard-load distribution over five consecutive epochs\}
+\textbackslash\{\}end\{center\}
+
+The shard-processing-time comparison leads to a similar conclusion. As shown in Fig.~2, ContribChain exhibits a clear straggler-shard effect, with several shards exceeding 1,300\textbackslash\{\},s of processing time, while LB-Chain reduces the dispersion and brings most shards close to 700\textbackslash\{\},s. The proposed method keeps all shard processing times below about 600\textbackslash\{\},s and yields the tightest distribution among the compared schemes. Since end-to-end throughput in a sharded system is bounded by its slowest shard rather than its average shard, this reduction in the long tail of processing time is a practically meaningful sign that the balancing policy is removing real bottlenecks rather than only improving a nominal load metric.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.90\textbackslash\{\}linewidth]\{src/resources/fig\emph{straggler}shards.png\}
+    \textbackslash\{\}captionof\{figure\}\{Comparison of actual shard processing time under different methods\}
+\textbackslash\{\}end\{center\}
+
+\subsection{Throughput Under Different Resources}\label{sec:throughput-under-different-resources}
+
+Fig.~3 reports the impact of bandwidth on system throughput. As the available bandwidth increases from 1\textbackslash\{\},Mbps to 20\textbackslash\{\},Mbps, all methods improve and then gradually saturate. In the low-bandwidth regime, the proposed method consistently outperforms the main compared baselines, indicating that preserving interaction locality can reduce the coordination cost that otherwise dominates under limited network resources. Near 20\textbackslash\{\},Mbps, the proposed method reaches about 1,800 TPS.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/fig\_bandwidth.png\}
+    \textbackslash\{\}captionof\{figure\}\{Effect of bandwidth limitation on system throughput\}
+\textbackslash\{\}end\{center\}
+
+Fig.~4 shows the throughput trend under different transaction injection rates. All methods improve as the load rises in the low-to-medium range, but the baselines begin to saturate when the injection rate reaches 2,500--3,000 TPS. Their throughput typically stabilizes around 1,300--1,400 TPS, indicating persistent backlog accumulation. In contrast, the proposed method still maintains more than 1,800 TPS. This behavior is consistent with the intended role of gas-aware pressure estimation: once workload intensity increases, execution-cost heterogeneity becomes harder to ignore, and a transaction-count proxy alone becomes less reliable for avoiding shard-level bottlenecks.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/fig\emph{injection}rates.png\}
+    \textbackslash\{\}captionof\{figure\}\{Effect of transaction injection rate on system throughput\}
+\textbackslash\{\}end\{center\}
+
+The shard-count sweep in Fig.~5 further demonstrates the scalability benefit of the proposed approach. Although all methods improve as the number of shards increases, the gain of the baselines slows down when cross-shard traffic becomes more frequent. The proposed method preserves strong account interactions within the same shard while keeping load variance under control, and thus reaches about 3,800 TPS at 32 shards. In the same setting, the compared baselines saturate near 2,900 TPS. The result suggests that the method helps additional shards translate into usable parallelism instead of having much of the expansion gain offset by rising coordination overhead.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/fig\emph{shard}numbers.png\}
+    \textbackslash\{\}captionof\{figure\}\{Effect of shard number on system throughput\}
+\textbackslash\{\}end\{center\}
+
+\subsection{Mempool Backlog Evolution}\label{sec:mempool-backlog-evolution}
+
+The mempool queue results further confirm the benefit of the proposed design. At 1,500 TPS, the queue grows during the injection phase and then shrinks after injection stops. The proposed method reaches a lower peak backlog and clears the queue faster than the baselines. More specifically, its peak queue length is about \$0.9 \textbackslash\{\}times 10^\{4\}\$ transactions, compared with approximately \$1.45 \textbackslash\{\}times 10^\{4\}\$ for ContribChain and \$1.25 \textbackslash\{\}times 10^\{4\}\$ for Presto. The smaller backlog indicates that the gain is visible not only in average throughput, but also in the system's ability to absorb transient pressure before congestion becomes persistent.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/fig\emph{queue}1500.png\}
+    \textbackslash\{\}captionof\{figure\}\{Queue-length evolution under an injection rate of 1,500 TPS\}
+\textbackslash\{\}end\{center\}
+
+At 2,500 TPS, backlog accumulation becomes more severe for all methods, but the proposed method still maintains a smaller peak queue and faster drainage. As shown in Fig.~7, the peak backlog of the proposed method is about \$2.9 \textbackslash\{\}times 10^\{4\}\$ transactions, while ContribChain reaches around \$5.0 \textbackslash\{\}times 10^\{4\}\$. This corresponds to a reduction of about 42.00\textbackslash\{\}\% in peak backlog. Under this heavier workload, the queueing behavior reinforces the central claim of the paper: balancing decisions become more robust when execution overhead and interaction topology are modeled jointly rather than separately.
+
+\textbackslash\{\}begin\{center\}
+    \textbackslash\{\}includegraphics[width=0.95\textbackslash\{\}linewidth]\{src/resources/fig\emph{queue}2500.png\}
+    \textbackslash\{\}captionof\{figure\}\{Queue-length evolution under an injection rate of 2,500 TPS\}
+\textbackslash\{\}end\{center\}
+
+\section{Discussion}\label{sec:discussion}
+
+The experimental results support the central design claim of the paper: shard reconfiguration should be guided by both execution pressure and interaction structure rather than by transaction counts alone. The heatmap and shard-processing-time comparisons show that the main gain is not merely a cosmetic redistribution of activity, but a reduction in execution-side skew. Once gas-aware pressure estimation is introduced, expensive contracts and high-cost interaction clusters are less likely to accumulate in a few shards, which in turn suppresses the straggler effect. This matters because system throughput in a sharded blockchain is often bounded by the slowest shard rather than by average shard behavior.
+
+The throughput results clarify where this modeling choice becomes most valuable. Under limited bandwidth, preserving interaction locality reduces the frequency of cross-shard coordination and helps the system use scarce network resources more effectively. Under high injection rates, the pressure model becomes more important because execution-cost heterogeneity can no longer be hidden behind similar transaction counts. Under larger shard counts, the method continues to help because the probability of splitting interaction-heavy account groups increases with the number of partitions. Taken together, these observations suggest that the reported performance gains come from addressing the two main sources of loss in sharded systems simultaneously: uneven execution pressure and rising cross-shard overhead.
+
+At the same time, the scope of the current evidence should be stated conservatively. First, the method relies on the quality of the sliding interaction window and EMA-based estimation, so it may respond slowly to abrupt workload shifts. Second, the migration procedure is heuristic and greedy, which makes it practical for epoch-level execution but does not provide a global optimum for the underlying constrained quadratic program. Third, the evaluation remains a trace-driven study under one BlockEmulator configuration and one reported set of parameter choices, rather than a full sensitivity or multi-platform robustness analysis. Fourth, the present evaluation emphasizes performance outcomes and does not separately quantify migration-state volume, reconfiguration latency, or migration-induced communication cost. The present results therefore support the effectiveness of the method in this evaluated setting, but they should not be interpreted as a complete characterization of every deployment environment.
+
+The system-level scope also deserves clarification. The method assumes that migrations are executed at epoch boundaries after the confirmed transactions in the current accounting window have been observed. State-transfer correctness, epoch-boundary consistency, and the underlying PBFT execution semantics are inherited from the sharded blockchain protocol and the BlockEmulator environment rather than redesigned by this paper. In that sense, the contribution here is a reconfiguration policy rather than a new safety protocol. The EMA smoothing and migration-budget constraint help reduce unnecessary churn, but they do not eliminate the possibility of oscillatory migrations under rapidly shifting or adversarial workloads, which remains an important direction for future refinement.
+
+These limitations also indicate several natural next steps. More adaptive prediction mechanisms may improve responsiveness to sudden workload changes, and broader distributed experiments could clarify how the same migration policy behaves under different consensus, network, and deployment conditions. Even with these caveats, the current study already supports a practical takeaway: epoch-level reconfiguration for smart-contract-oriented sharded blockchains becomes more reliable when execution overhead and interaction topology are modeled together instead of being optimized separately.
+
+\section{Conclusions}\label{sec:conclusions}
+
+This paper studies shard reconfiguration for smart-contract-oriented blockchains from the perspective of joint load balancing and interaction preservation. The proposed method models active accounts as a temporal interaction graph, uses gas-aware edge weights and EMA-based pressure estimation to describe shard stress more faithfully, and formulates account placement as a migration-budgeted optimization problem over load variance and cross-shard cut cost. To solve the resulting constrained assignment problem in a practical way, the paper develops a priority-queue heuristic with local differential updates for efficient epoch-level account migration.
+
+Experiments on Ethereum Mainnet traces in BlockEmulator show that this design leads to more balanced shard pressure, shorter shard processing time, higher throughput under multiple bandwidth, workload, and shard-count settings, and lower mempool backlog at high injection rates. Within the scope of the evaluated trace-driven setting, the results support a clear conclusion: shard reconfiguration becomes more effective when execution overhead and interaction topology are modeled together, rather than when either is treated in isolation.
+
+\textbackslash\{\}vspace\{2mm\}
+
+\bibliographystyle{plainnat}
+\bibliography{paper/jsc/src/thesis}
+
+\end{document}
