@@ -85,6 +85,30 @@ def test_workflow_runner_executes_discovery_plan_outline_and_contract_prep(clien
     assert run_detail.json()["id"] == run["id"]
 
 
+def test_workflow_runner_uses_discovery_document_type_for_outline(client) -> None:
+    paper = _create_paper(client)
+
+    response = client.post(
+        f"/papers/{paper['id']}/workflow-runs",
+        json={
+            "auto_execute": True,
+            "discovery": {
+                "document_type": "report",
+                "user_goal": "Prepare a decision report for operators.",
+                "audience": "Operations leads",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    plan = response.json()["plan"]
+    assert plan["task_profile"]["document_type"] == "report"
+
+    outline = client.get(f"/papers/{paper['id']}/outline").json()["nodes"]
+    titles = {node["title"] for node in outline}
+    assert {"Executive Summary", "Findings", "Recommendations"}.issubset(titles)
+
+
 def test_workflow_runner_dry_run_persists_pending_execution_steps(client) -> None:
     paper = _create_paper(client)
 

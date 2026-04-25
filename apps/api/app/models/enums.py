@@ -76,6 +76,8 @@ class ManuscriptIssueType(StrEnum):
     MISSING_SECTION_DRAFT = "missing_section_draft"
     UNRESOLVED_SECTION_REVIEW = "unresolved_section_review"
     TERMINOLOGY_DRIFT = "terminology_drift"
+    CONTRIBUTION_ALIGNMENT = "contribution_alignment"
+    ABSTRACT_CONCLUSION_MISMATCH = "abstract_conclusion_mismatch"
     MISSING_TRANSITION = "missing_transition"
     MISSING_INTRODUCTION = "missing_introduction"
     MISSING_CONCLUSION = "missing_conclusion"
@@ -130,6 +132,7 @@ class PlanningMode(StrEnum):
 class WorkflowRunStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
+    WAITING_FOR_USER = "waiting_for_user"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -159,3 +162,36 @@ class PromptStage(StrEnum):
     REVISER = "reviser"
     VERIFIER = "verifier"
     EDITOR = "editor"
+
+
+class UserInteractionRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class ClarificationStatus(StrEnum):
+    PENDING = "pending"
+    ANSWERED = "answered"
+    CANCELLED = "cancelled"
+
+
+class WorkflowCheckpointType(StrEnum):
+    CLARIFICATION = "clarification"
+    UNKNOWN_PLAN = "unknown_plan"
+    BLOCKED_SECTION = "blocked_section"
+    APPROVAL_REQUIRED = "approval_required"
+
+
+class WorkflowCheckpointStatus(StrEnum):
+    PENDING = "pending"
+    RESOLVED = "resolved"
+    CANCELLED = "cancelled"
+
+
+class SectionApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
+    UNLOCKED = "unlocked"
+    SUPERSEDED = "superseded"

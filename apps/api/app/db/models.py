@@ -2,6 +2,7 @@
 
 from app.models import (
     DiscoveryRecord,
+    ClarificationRequest,
     DraftUnit,
     EvidenceItem,
     EvidencePack,
@@ -12,14 +13,18 @@ from app.models import (
     PromptExecutionLog,
     ReviewComment,
     RevisionTask,
+    SectionApproval,
     SectionContract,
     SourceMaterial,
     StyleGuide,
+    UserInteraction,
+    WorkflowCheckpoint,
     WorkflowRun,
     WorkflowStepRun,
 )
 
 __all__ = [
+    "ClarificationRequest",
     "DiscoveryRecord",
     "DraftUnit",
     "EvidenceItem",
@@ -31,9 +36,12 @@ __all__ = [
     "PromptExecutionLog",
     "ReviewComment",
     "RevisionTask",
+    "SectionApproval",
     "SectionContract",
     "SourceMaterial",
     "StyleGuide",
+    "UserInteraction",
+    "WorkflowCheckpoint",
     "WorkflowRun",
     "WorkflowStepRun",
 ]

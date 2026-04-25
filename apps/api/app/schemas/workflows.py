@@ -21,6 +21,18 @@ class WorkflowRunStartRequest(ApiSchema):
     section_limit: int | None = None
 
 
+class WorkflowRunResumeRequest(ApiSchema):
+    force_replan: bool = True
+    auto_execute: bool | None = None
+    section_limit: int | None = None
+    additional_context: str | None = None
+
+
+class WorkflowStepRetryRequest(ApiSchema):
+    force_replan: bool = True
+    additional_context: str | None = None
+
+
 class WorkflowStepRunRead(ApiSchema):
     id: uuid.UUID
     workflow_run_id: uuid.UUID
@@ -63,4 +75,14 @@ class WorkflowRunDetailRead(WorkflowRunRead):
 class WorkflowRunStartResponse(ApiSchema):
     workflow_run: WorkflowRunDetailRead
     discovery: DiscoveryRead | None = None
+    plan: PlanningRunRead | None = None
+
+
+class WorkflowRunResumeResponse(WorkflowRunStartResponse):
+    pass
+
+
+class WorkflowStepRetryResponse(ApiSchema):
+    workflow_run: WorkflowRunDetailRead
+    retried_step: WorkflowStepRunRead
     plan: PlanningRunRead | None = None
