@@ -1,0 +1,105 @@
+{
+  "rubric_name": "academic-paper-writing-v1",
+  "version": "v1",
+  "scope": "Academic paper generation from method and result inputs.",
+  "target_standard": "Top-tier academic journal or conference submission draft.",
+  "score_scale": {
+    "min": 1,
+    "max": 5,
+    "anchors": {
+      "1": "Fails the dimension or creates serious scientific/writing risk.",
+      "2": "Partially addresses the dimension but needs major repair.",
+      "3": "Serviceable draft quality with clear revision needs.",
+      "4": "Strong academic draft with targeted improvements remaining.",
+      "5": "Near submission-ready for a demanding venue."
+    }
+  },
+  "dimensions": [
+    {
+      "key": "task_and_scope_fit",
+      "name": "Task and Scope Fit",
+      "weight": 10,
+      "checks": [
+        "The manuscript stays within the supplied method and result scope.",
+        "The document type, audience, and target venue are reflected.",
+        "The draft does not turn the task into a different paper."
+      ]
+    },
+    {
+      "key": "contribution_and_novelty_framing",
+      "name": "Contribution and Novelty Framing",
+      "weight": 15,
+      "checks": [
+        "The central contribution is explicit, specific, and defensible.",
+        "The novelty is framed as an intellectual advance, not generic hype.",
+        "The contribution is visible in the abstract, introduction, and conclusion."
+      ]
+    },
+    {
+      "key": "academic_storyline",
+      "name": "Academic Storyline",
+      "weight": 15,
+      "checks": [
+        "The paper has a clear problem-tension-solution-result arc.",
+        "The introduction motivates why the work matters now.",
+        "The narrative connects methods and results into one coherent claim."
+      ]
+    },
+    {
+      "key": "method_fidelity",
+      "name": "Method Fidelity",
+      "weight": 15,
+      "checks": [
+        "The method description preserves supplied procedures, data, models, or protocols.",
+        "The draft does not invent experimental details.",
+        "The method is concrete enough for expert readers to assess validity."
+      ]
+    },
+    {
+      "key": "results_fidelity",
+      "name": "Results Fidelity",
+      "weight": 15,
+      "checks": [
+        "The reported results match the supplied findings and quantitative facts.",
+        "The draft distinguishes observed results from interpretation.",
+        "The results are tied back to the research question and contribution."
+      ]
+    },
+    {
+      "key": "structure_and_coherence",
+      "name": "Structure and Coherence",
+      "weight": 10,
+      "checks": [
+        "The manuscript has recognizable scholarly structure.",
+        "Sections have distinct jobs and do not repeat the same claims mechanically.",
+        "Transitions help readers follow the argument."
+      ]
+    },
+    {
+      "key": "evidence_calibration_and_limitations",
+      "name": "Evidence Calibration and Limitations",
+      "weight": 10,
+      "checks": [
+        "Claims are calibrated to the evidence actually supplied.",
+        "Limitations and threats to validity are acknowledged when needed.",
+        "The draft avoids unsupported universal claims and false certainty."
+      ]
+    },
+    {
+      "key": "style_and_journal_readiness",
+      "name": "Style and Journal Readiness",
+      "weight": 10,
+      "checks": [
+        "The prose is precise, economical, and scholarly.",
+        "The draft avoids marketing language, filler, and vague importance claims.",
+        "The manuscript feels plausible as a serious submission draft."
+      ]
+    }
+  ],
+  "blocking_issue_policy": [
+    "Invented methods, datasets, metrics, or results are blockers.",
+    "Missing method or result coverage is a blocker for a full-paper generation task.",
+    "A paper with no clear contribution claim cannot score above 60 overall.",
+    "A paper that contradicts required facts cannot score above 50 overall."
+  ]
+}

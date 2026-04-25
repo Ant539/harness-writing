@@ -8,6 +8,8 @@ Current use:
 - `planner.md` defines structured planner behavior
 - `writer.md`, `reviewer.md`, `reviser.md`, `verifier.md`, and `editor.md` provide stage-level
   instructions used by the prompt assembly service
+- `evaluator.md` defines the academic-writing judge role used for prompt development and future
+  model-backed evaluation
 
 The runtime prompt assembly layer composes these files with persisted planning outputs such as task
 profile, source mode, style guidance, and risk emphasis.
