@@ -17,20 +17,25 @@ artifacts, not in this file.
 - [x] Add prompt versioning, prompt logging, and prompt module persistence for model-backed runs.
 - [x] Add a template-aware JCST export path that preserves the original submission template structure.
 - [x] Add manuscript compile validation for exported LaTeX.
+- [x] Add a first academic-writing evaluation harness for prompt optimization.
 
 ## Near Term
 
-- [ ] Expand discovery from a persisted snapshot endpoint into a true conversational clarification loop.
-- [ ] Add workflow run resume/retry support on top of the persisted step status model.
-- [ ] Add persistent user interaction and clarification state.
-- [ ] Add section locking and approval workflows.
-- [ ] Add stronger citation and evidence provenance checks.
-- [ ] Add whole-paper consistency review for terminology, contribution statements, and abstract/conclusion alignment.
-- [ ] Add provider cost and token accounting where provider responses expose usage metadata.
-- [ ] Generalize the system beyond papers into student reports, theses, proposals, and structured technical documents.
+- [x] Agent State And Interaction first pass:
+  - [x] Add `UserInteraction`, `ClarificationRequest`, and `WorkflowCheckpoint` models.
+  - [x] Expand discovery from a persisted snapshot endpoint into a conversational clarification loop.
+  - [x] Let workflow runs pause for unknown plans, blocked sections, or approval checkpoints.
+- [x] Add workflow run resume/retry support on top of the persisted step status model.
+- [x] Add section locking and approval workflows.
+- [x] Add stronger citation and evidence provenance checks.
+- [x] Add whole-paper consistency review for terminology, contribution statements, and abstract/conclusion alignment.
+- [x] Add provider cost and token accounting where provider responses expose usage metadata.
+- [x] Generalize the system beyond papers into student reports, theses, proposals, and structured technical documents.
 
 ## Later
 
+- [ ] Add prompt eval fixtures and regression runs for academic paper demo cases.
+- [ ] Add model-backed academic-writing evaluator once deterministic rubric baselines are stable.
 - [ ] Add a frontend/operator console for workflow orchestration.
 - [ ] Move stabilized service logic into `packages/*`.
 - [ ] Add migrations and production-ready operational logging.

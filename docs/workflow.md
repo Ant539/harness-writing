@@ -42,10 +42,14 @@ That unified workflow direction is now documented in:
 - `configs/workflows/v1.json`
 - `docs/development-plan.md`
 
-The runtime orchestrator for that discovery-and-plan-driven workflow is not implemented yet, but
-the persistence foundation now exists:
+The runtime orchestrator for that discovery-and-plan-driven workflow is still early, but the
+persistence and execution foundation now exists:
 
 - `POST /papers/{paper_id}/discovery` stores the latest discovery snapshot for a paper
+- `POST /papers/{paper_id}/discovery/clarifications` creates persisted discovery clarification
+  requests and assistant interaction records
+- `POST /clarifications/{clarification_id}/answer` stores a user answer and writes it back into
+  discovery metadata
 - `POST /papers/{paper_id}/plan` produces and persists a structured plan with task profile, entry
   strategy, paper plan, section plans, and prompt-assembly hints
 - `POST /papers/{paper_id}/workflow-runs` runs the first unified orchestration pass and persists
@@ -75,6 +79,13 @@ Current runner behavior:
     full review/revision path is unavailable
   - `blocked` records a skipped blocked step with the planner reason
 - records completed, pending, skipped, or failed workflow steps
+- pauses workflow runs as `waiting_for_user` and creates a workflow checkpoint when planning is
+  unknown, a section is blocked, or user approval is required before execution
+- resumes waiting workflow runs after pending checkpoints are resolved, appending replan and
+  execution steps to the existing run
+- retries supported workflow steps by appending `retry:*` steps after checking checkpoint state
+- records section approval requests, approval decisions, change requests, unlock events, and
+  checkpoint resolution through section approval history
 
 ## Paper Lifecycle
 
@@ -126,14 +137,31 @@ Implemented guards:
 - `reviewed -> revision_required`: occurs when review comments are generated.
 - `revision_required -> revised`: requires a current draft plus unresolved review comments or active revision tasks.
 - `revised -> reviewed`: supported by the state machine and review endpoint.
-- `locked`: exists in the state machine, but a full lock/approval endpoint is not implemented yet.
+- `reviewed -> locked` and `revised -> locked`: requires explicit section approval, an active draft,
+  and no unresolved review comments on that current draft.
+- `locked -> reviewed`: supported only through the section unlock endpoint.
+
+Section approval behavior:
+
+- `POST /sections/{section_id}/approval-request` creates a pending approval record for the current
+  active draft.
+- `POST /sections/{section_id}/approve` supersedes pending approvals, locks reviewed/revised
+  sections, records the approved draft ID, and can resolve an approval workflow checkpoint.
+- `POST /sections/{section_id}/request-changes` records a change-request decision and can resolve an
+  approval workflow checkpoint.
+- `POST /sections/{section_id}/unlock` records an unlock decision and returns the section to
+  `reviewed` for another editing pass.
 
 ## Current Behavior
 
 Planning:
 
-- Outlines are generated from fixed templates for conceptual, survey, and empirical papers.
-- Contracts are generated from section metadata and optional constraints.
+- Outlines are generated from fixed templates for conceptual, survey, and empirical academic papers,
+  plus document-type-specific templates for reports, theses, proposals, and technical documents.
+- Workflow-run outline generation carries the planned discovery document type into outline
+  generation, so non-paper use cases do not fall back to academic paper sections by default.
+- Contracts are generated from section metadata, document type, and optional constraints; generated
+  report, thesis, proposal, and technical-document sections get document-aware questions and tone.
 - Discovery records and planning runs now persist the first workflow decisions for task profile,
   source mode, maturity, section actions, and prompt-assembly hints.
 - The first workflow runner now consumes persisted planning output to decide whether to prepare an
@@ -145,6 +173,16 @@ Planning:
   planner, writer, reviewer, reviser, verifier, and editor stages.
 - Prompt artifacts persist module contents, prompt hashes, prompt pack versions, and prompt
   execution logs; model-backed planner calls also persist prompt and response logs.
+- Agent-state persistence now records user/assistant interactions, clarification requests, and
+  workflow checkpoints. Discovery clarification answers are stored both as user interactions and in
+  the active discovery record's metadata.
+- Workflow runs can now resume from `waiting_for_user` after checkpoint resolution. Resume replans by
+  default so clarification answers and newly added evidence can change the execution path.
+- Workflow-step retry is supported for planning, outline generation, contract generation, prompt
+  assembly, and section actions.
+- Section approval history now ties human approval decisions to active draft versions and workflow
+  checkpoints. Approved sections move to `locked`; unlock creates a separate audit record and moves
+  the section back to `reviewed`.
 - A future workflow runner should extend that execution path through global assembly, document
   review, final revision, and export.
 
@@ -162,6 +200,11 @@ Drafting:
 Review:
 
 - Section review uses heuristic checks for evidence IDs, citations, short drafts, weak structure, missing transitions, redundancy, and overclaiming terms.
+- Evidence verification now also checks unsupported bracketed citations, citations whose evidence
+  IDs are not in `supported_evidence_ids`, section-mismatched evidence, and missing or inconsistent
+  source provenance.
+- `POST /sections/{section_id}/verify-evidence` exposes those checks as a structured report for the
+  current active draft, contract, and active evidence pack.
 - Review comments automatically become revision tasks.
 
 Assembly:
@@ -172,7 +215,9 @@ Assembly:
 
 Global review and export:
 
-- Global review checks missing drafted sections, unresolved section reviews, missing introduction/conclusion, transition language, terminology drift, and duplicate sibling order indexes.
+- Global review checks missing drafted sections, unresolved section reviews, missing
+  introduction/conclusion, transition language, terminology drift, contribution alignment,
+  abstract/conclusion alignment, and duplicate sibling order indexes.
 - Markdown export returns assembled content.
 - LaTeX export can use the default article renderer or a template-aware path. The built-in
   `template_name=jcst` renderer preserves a submission-template structure with placeholders for
@@ -185,12 +230,20 @@ Global review and export:
 ## Current Workflow Gaps
 
 - No multi-turn conversational discovery agent yet.
+- Discovery has a first clarification loop, but it does not yet perform autonomous multi-turn
+  follow-up beyond persisted questions and answers.
 - No full-document workflow runner yet that reaches evidence, drafting, review, assembly, and export.
-- Planner-driven section action execution is first-pass only; it still needs tuned prompt packs,
-  richer diagnostics, retry/resume controls, and stronger model-backed revision behavior.
+- Planner-driven section action execution is first-pass only; it still needs richer diagnostics and
+  stronger model-backed revision behavior.
+- Whole-paper consistency review is deterministic and first-pass; no model-backed global editor
+  performs semantic argument restructuring yet.
 - No real LLM researcher, verifier, or global editor yet.
-- No full section locking/approval workflow.
+- Section locking/approval has a first-pass API and checkpoint linkage; it still needs richer
+  reviewer assignment, approval policy, and default locked-section assembly behavior.
 - No unified workflow runner yet that decides when export files should be written automatically.
 - No frontend/operator console.
-- No advanced citation or bibliography pipeline.
+- Citation/provenance checking is deterministic and first-pass; no bibliography database, citation
+  style rendering, semantic entailment, or cross-reference pipeline exists yet.
+- Non-paper document support has deterministic outline/contract/prompt behavior, but APIs and data
+  model names are still paper-centric.
 - No paragraph-level draft unit creation beyond the model enum.

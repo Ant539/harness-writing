@@ -24,6 +24,8 @@ As of April 24, 2026, the repository already has:
 - LaTeX import that converts an existing manuscript into Paper Harness paper/outline/draft records
 - deterministic outline generation
 - deterministic section contract generation
+- document-type-specific deterministic outline and contract behavior for reports, theses,
+  proposals, and technical documents
 - deterministic workflow planning with optional model-backed structured planner output when an LLM
   provider is configured
 - a first unified workflow runner that can auto-infer discovery, generate a plan, prepare an
@@ -33,8 +35,23 @@ As of April 24, 2026, the repository already has:
 - versioned prompt packs for planner, writer, reviewer, reviser, verifier, and editor stages
 - prompt hashes, prompt pack versions, persisted prompt modules, and prompt execution logs for
   assembled prompts plus model-backed planner calls
+- provider usage normalization for OpenAI-compatible, Anthropic, and Gemini responses, with token
+  and provider-reported cost fields persisted on prompt execution logs
+- persisted user interactions, clarification requests, and workflow checkpoints for the first
+  agent-state layer
+- discovery clarification loop endpoints that create assistant clarification prompts and persist
+  user answers back into discovery metadata
+- workflow-run pause behavior for unknown plans, blocked sections, and approval-required checkpoints
+- workflow-run resume after checkpoint resolution and workflow-step retry for planning, outline,
+  contract, prompt assembly, and section-action steps
 - planner-driven section action execution for preserve, polish, rewrite, repair, draft, and blocked,
   with conservative deterministic fallbacks when full automation is not yet safe
+- section approval history, approval/change-request/unlock endpoints, reviewed/revised-to-locked
+  transitions, and approval checkpoint resolution
+- deterministic citation and evidence provenance verification for current section drafts, exposed
+  through review findings and a section-level verification endpoint
+- deterministic whole-paper consistency checks for terminology drift, contribution statement
+  alignment, and abstract/conclusion alignment in global review
 - template-aware LaTeX export for JCST-style submissions, including caller-supplied template
   content with placeholder replacement
 - deterministic LaTeX compile preflight validation for exported manuscripts
@@ -50,13 +67,24 @@ As of April 24, 2026, the repository already has:
 
 ### What Is Missing Despite Those Building Blocks
 
-- no multi-turn discovery phase that actively talks with the user to clarify the writing objective
-- no unified workflow runner that executes the whole document lifecycle automatically
-- no prompt-assembly layer that composes prompts from task profile and workflow state
+- no full multi-turn discovery agent yet; current clarification loop persists questions and answers
+  but does not perform autonomous follow-up reasoning
+- no unified workflow runner that executes the whole document lifecycle through assembly and export
+  automatically
+- API and persistence names are still paper-centric even though planning, prompts, outline templates,
+  and contracts now support broader document types
 - prompt logging currently covers prompt assembly and model-backed planner calls; writer/reviewer
   model-call logging still needs to be wired into those lower-level generators
+- cost is recorded only when the provider response exposes explicit USD cost metadata; there is no
+  hard-coded model price table
 - no fully tuned model-backed section/unit action engine beyond the first deterministic execution
   bridge
+- section locking/approval is first-pass only; richer approval policy, assignment, and default
+  locked-section assembly behavior are still needed
+- citation/provenance checking is deterministic and structural; semantic claim-to-evidence
+  entailment, bibliography management, and style-specific citation rendering are still missing
+- whole-paper consistency review is deterministic and heuristic; no model-backed global editor
+  performs deep argument restructuring yet
 - no robust prompt pack tuned across multiple writing domains
 - no robust global editor/verifier loop
 - no external LaTeX compiler integration yet; current validation is a deterministic preflight gate
@@ -80,6 +108,10 @@ The system should eventually support:
 - thesis and dissertation writing
 - proposals
 - structured technical long-form writing
+
+The current implementation supports these as planning and execution modes on the existing paper
+project container. A later product/API pass can rename paper-centric routes and models once the
+workflow semantics stabilize.
 
 The target is a Claude Code-level writing agent: serious, stateful, plan-driven, and able to
 handle complex document work over multiple turns and workflow steps.
@@ -198,10 +230,17 @@ Expected result:
 
 ### 5. Global Document Coherence
 
-Needed:
+Implemented first pass:
 
-- whole-document terminology consistency checks
-- high-level structure alignment
+- terminology drift checks across the assembled manuscript
+- contribution-statement checks across introduction and conclusion
+- abstract/conclusion topic and contribution-preview alignment checks
+- persisted `ManuscriptIssue` records for global consistency findings
+
+Still needed:
+
+- model-backed global editor pass that can rewrite or propose whole-document edits
+- high-level structure alignment beyond introduction/conclusion heuristics
 - audience and goal consistency
 - figure/table/citation cross-checking where relevant
 - document-level revision pass after section loops
@@ -209,6 +248,29 @@ Needed:
 Expected result:
 
 - the final output reads like one coherent document rather than a pile of independently revised sections
+
+### 5a. Citation And Evidence Provenance
+
+Implemented first pass:
+
+- section-level `verify-evidence` endpoint
+- deterministic checks for support IDs outside the active pack, insufficient support count,
+  required citations missing from text, unsupported bracketed citation keys, cited evidence missing
+  from draft support IDs, section-mismatched evidence, and missing/inconsistent source provenance
+- reviewer support checks now persist citation/provenance problems as review comments and revision
+  tasks
+
+Still needed:
+
+- bibliography database and export integration
+- citation style rendering and validation
+- semantic claim-to-evidence entailment checks
+- cross-section citation consistency and duplicate source management
+
+Expected result:
+
+- section drafts carry auditable support IDs and citation keys before approval or export
+- unsupported citation markers are caught early rather than leaking into assembled manuscripts
 
 ### 6. Final Export
 
@@ -225,12 +287,49 @@ Expected result:
 
 ### 7. Agent State And Interaction
 
-Needed:
+Implemented first pass:
+
+- persistent `UserInteraction`, `ClarificationRequest`, and `WorkflowCheckpoint` records
+- discovery clarification requests generated from saved clarifying questions or missing discovery
+  fields
+- user answers persisted as interactions and copied into discovery metadata for planning context
+- workflow runs can pause with `waiting_for_user` when the plan is unknown, a section is blocked,
+  or an approval checkpoint is required
+- workflow runs can resume after pending checkpoints are resolved and retry supported persisted
+  workflow steps by appending new step records
+
+Still needed:
 
 - persistent workflow state model
-- user interaction records and clarification checkpoints
-- explicit state transitions for discovery, planning, execution, and review
-- resumable agent runs
+- richer user interaction records and clarification checkpoints
+- explicit state transitions for discovery, planning, execution, review, and approval decisions
+- fuller resume semantics for complete-document execution beyond the current early workflow runner
+
+### 8. Section Approval And Locking
+
+Implemented first pass:
+
+- persistent `SectionApproval` history records
+- approval request, approve, request-changes, unlock, list, and read endpoints
+- approval locks reviewed/revised sections only when the active draft has no unresolved review
+  comments
+- approval decisions supersede pending approval requests
+- approval and change-request decisions can resolve linked workflow checkpoints
+- unlock records an audit event and moves `locked -> reviewed`
+
+Still needed:
+
+- richer approval policy, reviewer identity, and role/assignment support
+- assembly defaults that prefer or require locked sections when appropriate
+- tighter workflow-run integration around approval-required checkpoints across full-document
+  execution
+- frontend/operator affordances for approving, requesting changes, and unlocking
+
+Expected result:
+
+- stable sections can be explicitly protected from destructive edits
+- approval checkpoints can resume workflow execution without losing auditability
+- assembly and export can eventually use approval state as a quality gate
 
 Expected result:
 
@@ -275,6 +374,12 @@ Expected result:
 
 - add JCST template-aware export
 - add compile and packaging checks
+
+### Stage 7: Approval-Gated Delivery
+
+- make assembly/export policy aware of locked sections
+- surface approval checkpoints in the operator workflow
+- connect approval history to final delivery readiness
 
 ## Completion Criteria
 

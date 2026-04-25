@@ -136,7 +136,8 @@ Current behavior:
 
 Future replacement point:
 
-- Add section locking, physical file writing, bibliography generation, DOCX/export adapters, and stronger global coherence review.
+- Tighten approval-gated assembly policy, physical file writing, bibliography generation,
+  DOCX/export adapters, and stronger global coherence review.
 
 ## Module Boundaries
 

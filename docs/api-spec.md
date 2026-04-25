@@ -83,6 +83,41 @@ Behavior:
 
 Returns the latest persisted discovery snapshot for the paper, or `null` if none exists yet.
 
+### `POST /papers/{paper_id}/discovery/clarifications`
+
+Creates persisted clarification requests for the active discovery loop.
+
+Behavior:
+
+- Uses explicit questions when supplied.
+- Otherwise uses unanswered `clarifying_questions` from the latest discovery record.
+- If no saved questions exist, creates conservative questions for missing goal, audience, success
+  criteria, or source-state fields.
+- Writes assistant `UserInteraction` records for each clarification question.
+
+### `POST /clarifications/{clarification_id}/answer`
+
+Stores a user answer to a clarification request.
+
+Behavior:
+
+- Creates a user `UserInteraction` record.
+- Marks the clarification request as `answered`.
+- Copies the question/answer pair into the active discovery record's metadata when the clarification
+  is discovery-linked.
+
+### `GET /papers/{paper_id}/clarifications`
+
+Lists clarification requests for a paper. Supports optional `status` filtering.
+
+### `POST /papers/{paper_id}/interactions`
+
+Persists a user, assistant, or system interaction record for a paper.
+
+### `GET /papers/{paper_id}/interactions`
+
+Lists persisted interaction records for a paper in chronological order.
+
 ### `POST /papers/{paper_id}/plan`
 
 Builds and persists a structured workflow plan.
@@ -141,6 +176,53 @@ Lists persisted workflow runs for a paper.
 
 Returns one workflow run with its persisted steps.
 
+When the runner encounters an unknown plan, blocked section, or approval-required checkpoint, it
+sets the workflow run status to `waiting_for_user`, stores the active checkpoint ID in run metadata,
+and stops before further execution.
+
+### `POST /workflow-runs/{run_id}/resume`
+
+Resumes a workflow run that is currently `waiting_for_user`.
+
+Behavior:
+
+- Rejects resume while any checkpoint for the run is still pending.
+- Replans by default, carrying an optional `additional_context` note into the planner.
+- Supports `auto_execute` and `section_limit` overrides for the resumed pass.
+- Appends new workflow-step records to the existing run rather than creating a new run.
+- Completes the run when resumed execution finishes, or pauses again with a new checkpoint if the
+  plan is still unknown or another section blocks execution.
+
+### `POST /workflow-steps/{step_id}/retry`
+
+Retries a persisted workflow step by appending a new retry step to the same workflow run.
+
+Current supported retry step kinds:
+
+- `plan` / `replan`
+- `generate_outline`
+- `generate_contract`
+- `assemble_prompts`
+- `section_action`
+
+Behavior:
+
+- Rejects retry while the workflow run has pending checkpoints.
+- Replans before retry by default.
+- Returns the workflow run, the newly appended retry step, and the current plan.
+
+### `POST /papers/{paper_id}/workflow-checkpoints`
+
+Creates a workflow checkpoint manually.
+
+### `GET /papers/{paper_id}/workflow-checkpoints`
+
+Lists workflow checkpoints for a paper. Supports optional `status` filtering.
+
+### `POST /workflow-checkpoints/{checkpoint_id}/resolve`
+
+Marks a checkpoint as resolved and persists an optional resolution note.
+
 ## Prompt Assemblies
 
 ### `POST /papers/{paper_id}/prompt-assemblies`
@@ -181,6 +263,9 @@ Current logged events:
 - prompt assembly creation for all stages
 - model-backed planner provider calls, including provider/model, prompt hash, response text, and
   failed-provider errors when the planner falls back
+- provider usage metadata when exposed by the provider response, normalized into
+  `prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`, `reasoning_tokens`, and
+  `cost_usd`; provider-specific raw usage is also kept under `usage.provider_usage`
 
 ### `GET /prompt-logs/{log_id}`
 
@@ -197,6 +282,12 @@ Behavior:
 - Rejects duplicate outline generation.
 - Moves paper from `idea` to `outline_ready`.
 - Creates sections as `planned`.
+- Accepts optional `document_type` (`academic_paper`, `report`, `thesis`, `proposal`,
+  `technical_document`, or `unknown`).
+- Uses document-type-specific deterministic templates for reports, theses, proposals, and
+  technical documents instead of always using academic paper sections.
+- Persists generated section metadata with the selected document type so later contract generation
+  can adapt questions, tone, and purpose text.
 
 ### `GET /papers/{paper_id}/outline`
 
@@ -229,6 +320,58 @@ Deletes a section.
 ### `POST /sections/{section_id}/transition`
 
 Explicit section status transition.
+
+### `POST /sections/{section_id}/approval-request`
+
+Creates a pending approval request for the current active section draft.
+
+Behavior:
+
+- Requires an active section draft.
+- May reference a workflow checkpoint that belongs to the same paper and section.
+- Persists requested-by, note, metadata, draft ID, and checkpoint linkage.
+
+### `POST /sections/{section_id}/approve`
+
+Approves the current active section draft and locks the section.
+
+Behavior:
+
+- Requires an active section draft.
+- Requires section status `reviewed` or `revised`.
+- Rejects approval while the current draft has unresolved review comments.
+- Supersedes any pending approval requests for the section.
+- Moves the section to `locked`.
+- If a workflow checkpoint ID is supplied, marks that checkpoint resolved.
+
+### `POST /sections/{section_id}/request-changes`
+
+Records an approval decision that requests further section changes.
+
+Behavior:
+
+- Requires an active section draft.
+- Rejects locked sections; unlock first before requesting changes.
+- Supersedes pending approval requests for the section.
+- If a workflow checkpoint ID is supplied, marks that checkpoint resolved.
+
+### `POST /sections/{section_id}/unlock`
+
+Unlocks a locked section for another editing/review pass.
+
+Behavior:
+
+- Requires section status `locked`.
+- Moves the section back to `reviewed`.
+- Persists an `unlocked` approval-history record.
+
+### `GET /sections/{section_id}/approvals`
+
+Lists section approval history in creation order.
+
+### `GET /section-approvals/{approval_id}`
+
+Returns one section approval record.
 
 ### `POST /sections/{section_id}/generate-contract`
 
@@ -320,6 +463,24 @@ Behavior:
 - Requires available evidence.
 - Moves `contract_ready -> evidence_ready`.
 - Rejects duplicate builds unless `force=true`.
+
+### `POST /sections/{section_id}/verify-evidence`
+
+Runs deterministic citation and evidence provenance checks for the current active section draft.
+
+Behavior:
+
+- Requires a current active section draft.
+- Requires a section contract.
+- Requires an active evidence pack.
+- Reports structured issues with `code`, `severity`, `message`, optional `evidence_id`, and
+  optional `citation_key`.
+- Checks draft support IDs against the active evidence pack.
+- Checks required citations, unsupported bracketed citations, and cited evidence missing from
+  `supported_evidence_ids`.
+- Checks evidence assignment/provenance, including section mismatch, missing `source_ref` and
+  `source_material_id`, invalid/missing source material references, source paper mismatch, and
+  source/evidence citation-key mismatch.
 
 ### `POST /sections/{section_id}/evidence-packs`
 
@@ -512,7 +673,9 @@ Behavior:
 - Requires a current active assembled manuscript.
 - Persists `ManuscriptIssue` records.
 - Returns existing issues if the current manuscript was already reviewed.
-- Checks missing draft placeholders, unresolved section review comments, missing introduction/conclusion, missing transitions, terminology drift, and duplicate sibling ordering.
+- Checks missing draft placeholders, unresolved section review comments, missing
+  introduction/conclusion, missing transitions, terminology drift, contribution alignment,
+  abstract/conclusion alignment, and duplicate sibling ordering.
 - Advances the paper to `global_review`, then `final_revision` if issues exist.
 
 ### `GET /papers/{paper_id}/manuscript-issues`

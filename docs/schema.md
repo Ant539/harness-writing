@@ -80,6 +80,8 @@ Implemented enums live in `apps/api/app/models/enums.py`.
 - `missing_section_draft`
 - `unresolved_section_review`
 - `terminology_drift`
+- `contribution_alignment`
+- `abstract_conclusion_mismatch`
 - `missing_transition`
 - `missing_introduction`
 - `missing_conclusion`
@@ -134,6 +136,7 @@ Implemented enums live in `apps/api/app/models/enums.py`.
 
 - `pending`
 - `running`
+- `waiting_for_user`
 - `completed`
 - `failed`
 
@@ -163,6 +166,39 @@ Implemented enums live in `apps/api/app/models/enums.py`.
 - `reviser`
 - `verifier`
 - `editor`
+
+### UserInteractionRole
+
+- `user`
+- `assistant`
+- `system`
+
+### ClarificationStatus
+
+- `pending`
+- `answered`
+- `cancelled`
+
+### WorkflowCheckpointType
+
+- `clarification`
+- `unknown_plan`
+- `blocked_section`
+- `approval_required`
+
+### WorkflowCheckpointStatus
+
+- `pending`
+- `resolved`
+- `cancelled`
+
+### SectionApprovalStatus
+
+- `pending`
+- `approved`
+- `changes_requested`
+- `unlocked`
+- `superseded`
 
 ## Persisted Models
 
@@ -287,6 +323,70 @@ Current section-action result behavior:
 - Skipped action steps include a `skip_reason`; blocked sections are represented as skipped
   section-action steps with `outcome=blocked`.
 
+### UserInteraction
+
+File: `apps/api/app/models/interaction.py`
+
+Represents one persisted user, assistant, or system message tied to a paper and optionally to a
+workflow run, discovery record, or clarification request.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `workflow_run_id`
+- `discovery_id`
+- `clarification_request_id`
+- `role`
+- `message`
+- `metadata_json`
+- `created_at`
+
+### ClarificationRequest
+
+File: `apps/api/app/models/interaction.py`
+
+Represents one persisted question that can pause discovery or workflow execution until the user
+answers it.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `workflow_run_id`
+- `discovery_id`
+- `question`
+- `context`
+- `status`
+- `answer`
+- `response_interaction_id`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+### WorkflowCheckpoint
+
+File: `apps/api/app/models/interaction.py`
+
+Represents a resumable workflow stop, such as an unknown plan, blocked section, clarification, or
+approval requirement.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `workflow_run_id`
+- `planning_run_id`
+- `section_id`
+- `checkpoint_type`
+- `status`
+- `reason`
+- `required_actions`
+- `clarification_request_ids`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
 ### PromptAssemblyArtifact
 
 File: `apps/api/app/models/prompts.py`
@@ -335,6 +435,13 @@ Key fields:
 - `prompt_pack_version`
 - `module_keys`
 - `request_metadata_json`
+- `usage_json`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `cached_tokens`
+- `reasoning_tokens`
+- `cost_usd`
 - `system_prompt`
 - `user_prompt`
 - `response_text`
@@ -475,6 +582,36 @@ Key fields:
 - `resolved`
 - `created_at`
 
+### SectionApproval
+
+File: `apps/api/app/models/approval.py`
+
+Represents section approval history and the draft version used when a section is locked or sent
+back for changes.
+
+Key fields:
+
+- `id`
+- `paper_id`
+- `section_id`
+- `draft_id`
+- `workflow_checkpoint_id`
+- `status`
+- `requested_by`
+- `decided_by`
+- `note`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Current behavior:
+
+- Approval requests create `pending` records.
+- Approval decisions supersede pending records, require no unresolved review comments on the
+  current draft, and move reviewed/revised sections to `locked`.
+- Change requests supersede pending records without locking the section.
+- Unlock decisions move `locked -> reviewed` and create an `unlocked` history record.
+
 ### RevisionTask
 
 File: `apps/api/app/models/revision.py`
@@ -590,6 +727,8 @@ Current behavior:
 - An `OutlineNode` has many `DraftUnit` records.
 - A `DraftUnit` has many `ReviewComment` records.
 - A `ReviewComment` can lead to a `RevisionTask`.
+- An `OutlineNode` has many `SectionApproval` records.
+- A `SectionApproval` can resolve a `WorkflowCheckpoint`.
 - A `Paper` has many `AssembledManuscript` records.
 - An `AssembledManuscript` has many `ManuscriptIssue` and `ExportArtifact` records.
 

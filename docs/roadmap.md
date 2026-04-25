@@ -4,9 +4,8 @@ This roadmap suggests the next useful implementation directions after Milestone 
 
 ## 1. Stronger Workflow Guards
 
-- Add section lock and unlock endpoints.
-- Store the approved draft version used for locking.
-- Make assembly default to locked sections once locking exists.
+- Tighten section approval policy and reviewer assignment.
+- Make assembly default to locked sections when approval-gated delivery is requested.
 - Add manuscript issue resolution.
 - Clarify paper-level status transitions during section drafting/review/revision.
 
@@ -19,7 +18,7 @@ Replace deterministic logic behind existing service boundaries:
 - Writer: draft and revision generation.
 - Reviewer: structured section review.
 - Verifier: claim-to-evidence alignment and citation verification.
-- Editor: global manuscript review and style normalization.
+- Editor: global manuscript review, whole-paper consistency repair, and style normalization.
 
 Recommended approach:
 
@@ -32,7 +31,7 @@ Recommended approach:
 - Add file upload and text extraction.
 - Add structured source metadata and citation records.
 - Add bibliography export support.
-- Add stronger provenance validation.
+- Extend first-pass provenance validation into semantic claim-to-evidence checks.
 - Add citation style handling.
 
 ## 4. Export Pipeline
