@@ -81,6 +81,9 @@ def test_prompt_assembly_endpoint_builds_and_persists_writer_prompt(client) -> N
     assert logs.json()[0]["prompt_assembly_id"] == artifact["id"]
     assert logs.json()[0]["prompt_hash"] == artifact["prompt_hash"]
     assert logs.json()[0]["prompt_pack_version"] == "v1"
+    assert logs.json()[0]["usage"] == {}
+    assert logs.json()[0]["total_tokens"] is None
+    assert logs.json()[0]["cost_usd"] is None
     assert discovery["id"] == client.get(f"/papers/{paper['id']}/discovery").json()["id"]
 
 

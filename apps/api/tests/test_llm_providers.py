@@ -43,6 +43,14 @@ def test_openai_compatible_provider_posts_chat_completions(monkeypatch) -> None:
                 json={
                     "model": "glm-test",
                     "choices": [{"message": {"content": "{\"ok\": true}"}}],
+                    "usage": {
+                        "prompt_tokens": 12,
+                        "completion_tokens": 5,
+                        "total_tokens": 17,
+                        "prompt_tokens_details": {"cached_tokens": 3},
+                        "completion_tokens_details": {"reasoning_tokens": 2},
+                        "cost_usd": 0.0012,
+                    },
                 },
             )
 
@@ -66,6 +74,12 @@ def test_openai_compatible_provider_posts_chat_completions(monkeypatch) -> None:
 
     assert result.content == "{\"ok\": true}"
     assert result.provider == "glm_coding"
+    assert result.usage["prompt_tokens"] == 12
+    assert result.usage["completion_tokens"] == 5
+    assert result.usage["total_tokens"] == 17
+    assert result.usage["cached_tokens"] == 3
+    assert result.usage["reasoning_tokens"] == 2
+    assert result.cost_usd == 0.0012
     assert calls[0]["url"] == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
     assert calls[0]["headers"]["Authorization"] == "Bearer test-key"
     assert calls[0]["json"]["model"] == "glm-test"

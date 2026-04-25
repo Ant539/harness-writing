@@ -54,6 +54,13 @@ class PromptExecutionLog(SQLModel, table=True):
     prompt_pack_version: str | None = None
     module_keys: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     request_metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    usage_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cost_usd: float | None = None
     system_prompt: str | None = None
     user_prompt: str | None = None
     response_text: str | None = None

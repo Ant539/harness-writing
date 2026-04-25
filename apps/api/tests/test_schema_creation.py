@@ -28,8 +28,12 @@ def test_database_schema_contains_core_tables() -> None:
         "draft_units",
         "review_comments",
         "revision_tasks",
+        "section_approvals",
         "source_materials",
         "style_guides",
+        "user_interactions",
+        "clarification_requests",
+        "workflow_checkpoints",
         "workflow_runs",
         "workflow_step_runs",
     }.issubset(table_names)

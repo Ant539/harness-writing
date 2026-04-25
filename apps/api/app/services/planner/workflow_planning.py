@@ -325,6 +325,8 @@ class WorkflowPlanningService:
             system_prompt=system,
             user_prompt=user,
             response_text=result.content,
+            usage=result.usage,
+            cost_usd=result.cost_usd,
             request_metadata={"expect_json": True, "path": "workflow_planning"},
         )
         payload = parse_json_object(result.content)
@@ -453,8 +455,9 @@ class WorkflowPlanningService:
         task_profile: TaskProfile,
         entry_strategy: EntryStrategy,
     ) -> PaperPlan:
+        document_label = self._document_label(task_profile.document_type)
         objective = (
-            f"Prepare '{context.paper.title}' for execution as a {task_profile.document_type.value} "
+            f"Prepare '{context.paper.title}' for execution as a {document_label} "
             "by clarifying the goal, choosing a safe entry path, and sequencing section work."
         )
         risks: list[str] = []
@@ -468,6 +471,10 @@ class WorkflowPlanningService:
             risks.append("Unresolved review comments indicate the draft needs repair before assembly.")
         if not task_profile.constraints:
             risks.append("Format and venue constraints are still underspecified.")
+        if task_profile.document_type != DocumentType.ACADEMIC_PAPER:
+            risks.append(
+                f"Document-specific structure for a {document_label} must stay distinct from academic paper defaults."
+            )
 
         workflow_steps = ["discover", "plan", "assemble_prompts"]
         if not context.sections:
@@ -568,11 +575,7 @@ class WorkflowPlanningService:
         ]
         if paper_plan.global_risks:
             modules.append("verification_emphasis")
-        style_profile = (
-            "default_academic"
-            if task_profile.document_type == DocumentType.ACADEMIC_PAPER
-            else "default_structured"
-        )
+        style_profile = self._style_profile_for(task_profile.document_type)
         risk_emphasis = list(paper_plan.global_risks)
         if entry_strategy.source_mode == SourceMode.MIXED:
             risk_emphasis.append("Mixed source mode requires preserving strong existing material.")
@@ -594,8 +597,37 @@ class WorkflowPlanningService:
             return document_type
         return self._paper_document_type(paper)
 
-    def _paper_document_type(self, _: Paper) -> DocumentType:
+    def _paper_document_type(self, paper: Paper) -> DocumentType:
+        context = " ".join([paper.title, paper.target_venue or ""]).lower()
+        if "thesis" in context or "dissertation" in context:
+            return DocumentType.THESIS
+        if "proposal" in context or "grant" in context:
+            return DocumentType.PROPOSAL
+        if "report" in context:
+            return DocumentType.REPORT
+        if "technical document" in context or "specification" in context or "manual" in context:
+            return DocumentType.TECHNICAL_DOCUMENT
         return DocumentType.ACADEMIC_PAPER
+
+    def _document_label(self, document_type: DocumentType) -> str:
+        labels = {
+            DocumentType.ACADEMIC_PAPER: "academic paper",
+            DocumentType.REPORT: "structured report",
+            DocumentType.THESIS: "thesis",
+            DocumentType.PROPOSAL: "proposal",
+            DocumentType.TECHNICAL_DOCUMENT: "technical document",
+        }
+        return labels.get(document_type, "structured document")
+
+    def _style_profile_for(self, document_type: DocumentType) -> str:
+        profiles = {
+            DocumentType.ACADEMIC_PAPER: "default_academic",
+            DocumentType.REPORT: "default_report",
+            DocumentType.THESIS: "default_thesis",
+            DocumentType.PROPOSAL: "default_proposal",
+            DocumentType.TECHNICAL_DOCUMENT: "default_technical",
+        }
+        return profiles.get(document_type, "default_structured")
 
     def _unresolved_section_reviews(
         self,

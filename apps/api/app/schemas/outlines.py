@@ -2,7 +2,7 @@
 
 import uuid
 
-from app.models.enums import SectionStatus
+from app.models.enums import DocumentType, SectionStatus
 from app.schemas.common import ApiSchema
 from app.schemas.papers import PaperRead
 
@@ -48,6 +48,7 @@ class OutlineRead(ApiSchema):
 
 
 class OutlineGenerationRequest(ApiSchema):
+    document_type: DocumentType | None = None
     additional_context: str | None = None
     target_word_count: int | None = None
 

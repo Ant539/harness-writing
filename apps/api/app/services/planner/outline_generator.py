@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.models import OutlineNode, Paper
-from app.models.enums import PaperStatus, PaperType
+from app.models.enums import DocumentType, PaperStatus, PaperType
 from app.schemas.outlines import OutlineGenerationRequest
 from app.services.llm import LLMMessage, LLMProvider, LLMRequest, get_llm_provider
 from app.services.llm.json_utils import parse_json_object
@@ -47,9 +47,13 @@ class OutlineGenerator:
         except InvalidStateTransition as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        target_word_count = request.target_word_count or self._default_word_count(paper.paper_type)
+        document_type = self._document_type_for(paper, request)
+        target_word_count = request.target_word_count or self._default_word_count(
+            paper.paper_type,
+            document_type,
+        )
         specs = list(self._outline_specs(paper, request))
-        nodes = self._persist_specs(paper, specs, target_word_count)
+        nodes = self._persist_specs(paper, specs, target_word_count, document_type)
 
         paper.status = PaperStatus.OUTLINE_READY
         paper.updated_at = datetime.now(timezone.utc)
@@ -65,6 +69,7 @@ class OutlineGenerator:
         paper: Paper,
         specs: list[OutlineNodeSpec],
         target_word_count: int,
+        document_type: DocumentType,
     ) -> list[OutlineNode]:
         created: list[OutlineNode] = []
         top_level_budget = max(target_word_count // max(len(specs), 1), 350)
@@ -78,6 +83,7 @@ class OutlineGenerator:
                 expected_claims=spec.expected_claims,
                 word_budget=top_level_budget,
                 order_index=spec.order_index,
+                metadata_json={"document_type": document_type.value, "section_role": spec.title.lower()},
             )
             self.session.add(parent)
             self.session.commit()
@@ -95,6 +101,10 @@ class OutlineGenerator:
                     expected_claims=child_spec.expected_claims,
                     word_budget=child_budget,
                     order_index=child_spec.order_index,
+                    metadata_json={
+                        "document_type": document_type.value,
+                        "section_role": child_spec.title.lower(),
+                    },
                 )
                 self.session.add(child)
                 self.session.commit()
@@ -112,6 +122,15 @@ class OutlineGenerator:
             return self._llm_outline_specs(paper, request)
         topic = paper.title
         context = f" Context: {request.additional_context}" if request.additional_context else ""
+        document_type = self._document_type_for(paper, request)
+        if document_type == DocumentType.REPORT:
+            return self._report_specs(topic, context)
+        if document_type == DocumentType.THESIS:
+            return self._thesis_specs(topic, context)
+        if document_type == DocumentType.PROPOSAL:
+            return self._proposal_specs(topic, context)
+        if document_type == DocumentType.TECHNICAL_DOCUMENT:
+            return self._technical_document_specs(topic, context)
         if paper.paper_type == PaperType.SURVEY:
             return self._survey_specs(topic, context)
         if paper.paper_type == PaperType.EMPIRICAL:
@@ -177,15 +196,20 @@ class OutlineGenerator:
         paper: Paper,
         request: OutlineGenerationRequest,
     ) -> list[OutlineNodeSpec]:
-        target_words = request.target_word_count or self._default_word_count(paper.paper_type)
+        document_type = self._document_type_for(paper, request)
+        target_words = request.target_word_count or self._default_word_count(
+            paper.paper_type,
+            document_type,
+        )
         system = (
-            "You are the planner in Paper Harness. Produce evidence-aware academic paper "
+            "You are the planner in Paper Harness. Produce evidence-aware structured document "
             "outlines as strict JSON. Do not invent citations, experiments, datasets, or "
-            "results. Keep section titles concise and publication-appropriate."
+            "results. Keep section titles concise and appropriate to the document type."
         )
         user = (
             "Create a hierarchical outline for this paper.\n\n"
             f"Title: {paper.title}\n"
+            f"Document type: {document_type.value}\n"
             f"Paper type: {paper.paper_type}\n"
             f"Target venue: {paper.target_venue or 'unspecified'}\n"
             f"Target language: {paper.target_language}\n"
@@ -230,6 +254,20 @@ class OutlineGenerator:
             for index, item in enumerate(raw_outline)
         ]
         return specs
+
+    def _document_type_for(self, paper: Paper, request: OutlineGenerationRequest) -> DocumentType:
+        if request.document_type and request.document_type != DocumentType.UNKNOWN:
+            return request.document_type
+        context = " ".join([paper.title, paper.target_venue or "", request.additional_context or ""]).lower()
+        if "thesis" in context or "dissertation" in context:
+            return DocumentType.THESIS
+        if "proposal" in context or "grant" in context:
+            return DocumentType.PROPOSAL
+        if "report" in context:
+            return DocumentType.REPORT
+        if "technical document" in context or "specification" in context or "manual" in context:
+            return DocumentType.TECHNICAL_DOCUMENT
+        return DocumentType.ACADEMIC_PAPER
 
     def _spec_from_dict(self, item: dict, *, fallback_order: int) -> OutlineNodeSpec:
         if not isinstance(item, dict):
@@ -379,7 +417,197 @@ class OutlineGenerator:
             ),
         ]
 
-    def _default_word_count(self, paper_type: PaperType) -> int:
+    def _report_specs(self, topic: str, context: str) -> list[OutlineNodeSpec]:
+        return [
+            OutlineNodeSpec(
+                "Executive Summary",
+                f"Summarize the purpose, findings, and recommended action for {topic}.{context}",
+                ["The report gives a concise decision-oriented summary."],
+                1,
+            ),
+            OutlineNodeSpec(
+                "Context and Scope",
+                "Define the reporting context, audience needs, and boundaries.",
+                ["The report scope is explicit and usable by the target audience."],
+                2,
+            ),
+            OutlineNodeSpec(
+                "Findings",
+                "Present the main findings in a structured, evidence-grounded order.",
+                ["The findings follow from available source material."],
+                3,
+            ),
+            OutlineNodeSpec(
+                "Analysis",
+                "Interpret the findings and explain their implications.",
+                ["The analysis connects findings to the user's objective."],
+                4,
+            ),
+            OutlineNodeSpec(
+                "Recommendations",
+                "Translate the analysis into practical next steps.",
+                ["Recommendations are feasible and traceable to findings."],
+                5,
+            ),
+            OutlineNodeSpec(
+                "Appendix",
+                "Collect supporting details that should not interrupt the main report.",
+                ["Supplementary material remains organized and optional."],
+                6,
+            ),
+        ]
+
+    def _thesis_specs(self, topic: str, context: str) -> list[OutlineNodeSpec]:
+        return [
+            OutlineNodeSpec(
+                "Introduction",
+                f"Frame the research problem, contribution, and chapter roadmap for {topic}.{context}",
+                ["The thesis establishes a durable research contribution."],
+                1,
+            ),
+            OutlineNodeSpec(
+                "Literature Review",
+                "Synthesize prior work and identify the research gap.",
+                ["Prior work motivates the thesis contribution."],
+                2,
+            ),
+            OutlineNodeSpec(
+                "Research Design",
+                "Describe the questions, methods, materials, and validity considerations.",
+                ["The research design can answer the central questions."],
+                3,
+                children=(
+                    OutlineNodeSpec(
+                        "Data and Sources",
+                        "Document the primary data, sources, or materials.",
+                        ["The source base is sufficient for the thesis argument."],
+                        1,
+                    ),
+                    OutlineNodeSpec(
+                        "Analysis Strategy",
+                        "Explain the analytical procedure and checks.",
+                        ["The analysis strategy is transparent and reproducible."],
+                        2,
+                    ),
+                ),
+            ),
+            OutlineNodeSpec(
+                "Findings and Argument",
+                "Develop the central thesis argument from evidence and analysis.",
+                ["The findings support the stated contribution."],
+                4,
+            ),
+            OutlineNodeSpec(
+                "Discussion",
+                "Connect findings to theory, limitations, and implications.",
+                ["The discussion situates the thesis contribution."],
+                5,
+            ),
+            OutlineNodeSpec(
+                "Conclusion",
+                "Close the thesis by restating contributions and future work.",
+                ["The conclusion consolidates the long-form argument."],
+                6,
+            ),
+        ]
+
+    def _proposal_specs(self, topic: str, context: str) -> list[OutlineNodeSpec]:
+        return [
+            OutlineNodeSpec(
+                "Overview",
+                f"State the opportunity, objective, and requested decision for {topic}.{context}",
+                ["The proposal frames a clear ask."],
+                1,
+            ),
+            OutlineNodeSpec(
+                "Problem and Need",
+                "Explain the problem, stakeholders, and urgency.",
+                ["The need is concrete and audience-relevant."],
+                2,
+            ),
+            OutlineNodeSpec(
+                "Proposed Approach",
+                "Describe the proposed solution and why it fits the need.",
+                ["The approach is feasible and aligned with constraints."],
+                3,
+            ),
+            OutlineNodeSpec(
+                "Work Plan",
+                "Break the proposal into phases, deliverables, and responsibilities.",
+                ["The work plan is executable."],
+                4,
+            ),
+            OutlineNodeSpec(
+                "Risks and Mitigations",
+                "Identify major risks and how the plan will reduce them.",
+                ["The proposal handles uncertainty explicitly."],
+                5,
+            ),
+            OutlineNodeSpec(
+                "Expected Outcomes",
+                "Describe outputs, evaluation criteria, and next steps.",
+                ["The expected outcomes are measurable and useful."],
+                6,
+            ),
+        ]
+
+    def _technical_document_specs(self, topic: str, context: str) -> list[OutlineNodeSpec]:
+        return [
+            OutlineNodeSpec(
+                "Overview",
+                f"Explain the purpose, users, and operating context for {topic}.{context}",
+                ["The document gives readers a clear orientation."],
+                1,
+            ),
+            OutlineNodeSpec(
+                "Requirements",
+                "List functional, operational, and quality requirements.",
+                ["Requirements are explicit and testable."],
+                2,
+            ),
+            OutlineNodeSpec(
+                "Architecture",
+                "Describe the system structure, interfaces, and key decisions.",
+                ["The architecture explains how components fit together."],
+                3,
+                children=(
+                    OutlineNodeSpec(
+                        "Components",
+                        "Break down major components and responsibilities.",
+                        ["Each component has a clear responsibility."],
+                        1,
+                    ),
+                    OutlineNodeSpec(
+                        "Interfaces",
+                        "Document inputs, outputs, protocols, or contracts.",
+                        ["Interfaces are precise enough for implementation."],
+                        2,
+                    ),
+                ),
+            ),
+            OutlineNodeSpec(
+                "Implementation Notes",
+                "Capture constraints, setup details, and operational guidance.",
+                ["Implementation guidance is practical and scoped."],
+                4,
+            ),
+            OutlineNodeSpec(
+                "Validation",
+                "Describe checks, tests, acceptance criteria, and known limits.",
+                ["Validation criteria make quality inspectable."],
+                5,
+            ),
+        ]
+
+    def _default_word_count(self, paper_type: PaperType, document_type: DocumentType) -> int:
+        if document_type == DocumentType.REPORT:
+            return 5000
+        if document_type == DocumentType.THESIS:
+            return 30000
+        if document_type == DocumentType.PROPOSAL:
+            return 4500
+        if document_type == DocumentType.TECHNICAL_DOCUMENT:
+            return 6500
         if paper_type == PaperType.SURVEY:
             return 9000
         if paper_type == PaperType.EMPIRICAL:

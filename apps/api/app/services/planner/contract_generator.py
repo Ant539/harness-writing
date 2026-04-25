@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.models import OutlineNode, Paper, SectionContract
-from app.models.enums import SectionStatus
+from app.models.enums import DocumentType, SectionStatus
 from app.schemas.contracts import ContractGenerationRequest
 from app.services.llm import LLMMessage, LLMProvider, LLMRequest, get_llm_provider
 from app.services.llm.json_utils import parse_json_object
@@ -72,8 +72,10 @@ class ContractGenerator:
     ) -> dict:
         if self.llm_provider is not None:
             return self._llm_contract_data(paper, section, request)
+        document_type = self._document_type_for(section)
+        document_label = self._document_label(document_type)
         expected_claims = section.expected_claims or [
-            f"The {section.title.lower()} section advances the paper's central argument."
+            f"The {section.title.lower()} section advances the {document_label}'s central objective."
         ]
         constraints = (
             f" Additional constraints: {request.additional_constraints}"
@@ -86,8 +88,8 @@ class ContractGenerator:
 
         return {
             "purpose": (
-                f"Write the {section.title} section for '{paper.title}' so it fulfills "
-                f"the section goal: {section.goal or 'advance the paper argument'}.{constraints}"
+                f"Write the {section.title} section for the {document_label} '{paper.title}' so it fulfills "
+                f"the section goal: {section.goal or f'advance the {document_label} objective'}.{constraints}"
             ),
             "questions_to_answer": self._questions_for(section),
             "required_claims": expected_claims,
@@ -96,9 +98,9 @@ class ContractGenerator:
             "forbidden_patterns": [
                 "Do not introduce citations that are absent from the evidence store.",
                 "Do not make unsupported empirical claims.",
-                "Do not rewrite other manuscript sections.",
+                "Do not rewrite other document sections.",
             ],
-            "tone": "clear academic",
+            "tone": self._default_tone(document_type),
             "length_min": length_min,
             "length_max": length_max,
         }
@@ -111,12 +113,14 @@ class ContractGenerator:
     ) -> dict:
         system = (
             "You are the planner in Paper Harness. Create strict section contracts "
-            "for evidence-grounded academic writing. Return JSON only. Do not invent "
+            "for evidence-grounded structured writing. Return JSON only. Do not invent "
             "citations, experiments, datasets, or claims beyond the paper metadata."
         )
+        document_type = self._document_type_for(section)
         user = (
             "Create a section contract.\n\n"
             f"Paper title: {paper.title}\n"
+            f"Document type: {document_type.value}\n"
             f"Paper type: {paper.paper_type}\n"
             f"Target venue: {paper.target_venue or 'unspecified'}\n"
             f"Section title: {section.title}\n"
@@ -163,7 +167,10 @@ class ContractGenerator:
             "purpose": self._required_text(payload, "purpose"),
             "questions_to_answer": self._string_list(payload.get("questions_to_answer")),
             "required_claims": required_claims
-            or [f"The {section.title.lower()} section advances the paper's central argument."],
+            or [
+                f"The {section.title.lower()} section advances the "
+                f"{self._document_label(self._document_type_for(section))}'s central objective."
+            ],
             "required_evidence_count": self._optional_positive_int(
                 payload.get("required_evidence_count"),
                 max(1, min(3, len(required_claims) or 1)),
@@ -174,7 +181,9 @@ class ContractGenerator:
                 "Do not introduce citations that are absent from the evidence store.",
                 "Do not make unsupported empirical claims.",
             ],
-            "tone": payload.get("tone") if isinstance(payload.get("tone"), str) else "clear academic",
+            "tone": payload.get("tone")
+            if isinstance(payload.get("tone"), str)
+            else self._default_tone(self._document_type_for(section)),
             "length_min": length_min,
             "length_max": length_max,
         }
@@ -199,6 +208,59 @@ class ContractGenerator:
 
     def _questions_for(self, section: OutlineNode) -> list[str]:
         title = section.title.lower()
+        document_type = self._document_type_for(section)
+        if document_type == DocumentType.REPORT:
+            if "executive summary" in title or title == "summary":
+                return [
+                    "What should the reader understand immediately?",
+                    "What findings or recommendations matter most?",
+                    "What decision or next action does this summary support?",
+                ]
+            if "recommend" in title:
+                return [
+                    "What action should the reader take?",
+                    "Which findings justify each recommendation?",
+                    "What constraints or tradeoffs affect implementation?",
+                ]
+        if document_type == DocumentType.THESIS:
+            if "literature" in title:
+                return [
+                    "What bodies of work must be synthesized?",
+                    "What research gap emerges?",
+                    "How does this section support the thesis contribution?",
+                ]
+            if "research design" in title or "method" in title:
+                return [
+                    "What research questions guide the design?",
+                    "What sources, data, or materials are used?",
+                    "How is validity or reproducibility addressed?",
+                ]
+        if document_type == DocumentType.PROPOSAL:
+            if "approach" in title or "work plan" in title:
+                return [
+                    "What is being proposed?",
+                    "Why is the approach feasible?",
+                    "What deliverables, phases, or constraints must be visible?",
+                ]
+            if "risk" in title:
+                return [
+                    "What could prevent success?",
+                    "How will each risk be mitigated?",
+                    "What assumptions should the reader approve?",
+                ]
+        if document_type == DocumentType.TECHNICAL_DOCUMENT:
+            if "requirements" in title:
+                return [
+                    "What behavior or quality must the system satisfy?",
+                    "Which requirements are testable?",
+                    "What constraints shape implementation?",
+                ]
+            if "architecture" in title or "interface" in title:
+                return [
+                    "What components or interfaces must be documented?",
+                    "How do the parts interact?",
+                    "What decisions or tradeoffs should be preserved?",
+                ]
         if "introduction" in title:
             return [
                 "What problem does the paper address?",
@@ -232,5 +294,32 @@ class ContractGenerator:
         return [
             "What is the section's main claim?",
             "What evidence or reasoning must support the claim?",
-            "How does this section connect to the overall paper?",
+            "How does this section connect to the overall document?",
         ]
+
+    def _document_type_for(self, section: OutlineNode) -> DocumentType:
+        raw_value = section.metadata_json.get("document_type")
+        try:
+            return DocumentType(raw_value)
+        except (TypeError, ValueError):
+            return DocumentType.ACADEMIC_PAPER
+
+    def _document_label(self, document_type: DocumentType) -> str:
+        labels = {
+            DocumentType.ACADEMIC_PAPER: "paper",
+            DocumentType.REPORT: "report",
+            DocumentType.THESIS: "thesis",
+            DocumentType.PROPOSAL: "proposal",
+            DocumentType.TECHNICAL_DOCUMENT: "technical document",
+        }
+        return labels.get(document_type, "document")
+
+    def _default_tone(self, document_type: DocumentType) -> str:
+        tones = {
+            DocumentType.ACADEMIC_PAPER: "clear academic",
+            DocumentType.REPORT: "clear decision-oriented",
+            DocumentType.THESIS: "formal scholarly",
+            DocumentType.PROPOSAL: "persuasive and concrete",
+            DocumentType.TECHNICAL_DOCUMENT: "precise technical",
+        }
+        return tones.get(document_type, "clear structured")

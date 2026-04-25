@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.services.llm.types import LLMMessage, LLMRequest, LLMResult
+from app.services.llm.usage import normalize_usage
 
 
 class LLMProviderError(RuntimeError):
@@ -78,11 +79,14 @@ class OpenAICompatibleProvider:
             raise LLMProviderError(f"{self.provider_name} returned no assistant content.") from exc
         if not isinstance(content, str) or not content.strip():
             raise LLMProviderError(f"{self.provider_name} returned empty assistant content.")
+        usage = normalize_usage(self.provider_name, payload)
         return LLMResult(
             content=content,
             provider=self.provider_name,
             model=str(payload.get("model") or model),
             raw=payload,
+            usage=usage.as_dict(),
+            cost_usd=usage.cost_usd,
         )
 
 
@@ -128,7 +132,15 @@ class AnthropicProvider:
         ).strip()
         if not content:
             raise LLMProviderError("anthropic returned empty assistant content.")
-        return LLMResult(content=content, provider=self.provider_name, model=model, raw=data)
+        usage = normalize_usage(self.provider_name, data)
+        return LLMResult(
+            content=content,
+            provider=self.provider_name,
+            model=model,
+            raw=data,
+            usage=usage.as_dict(),
+            cost_usd=usage.cost_usd,
+        )
 
     def _split_system(self, messages: list[LLMMessage]) -> tuple[str | None, list[dict[str, str]]]:
         system_parts: list[str] = []
@@ -196,4 +208,12 @@ class GeminiProvider:
         ).strip()
         if not content:
             raise LLMProviderError("gemini returned empty assistant content.")
-        return LLMResult(content=content, provider=self.provider_name, model=model, raw=data)
+        usage = normalize_usage(self.provider_name, data)
+        return LLMResult(
+            content=content,
+            provider=self.provider_name,
+            model=model,
+            raw=data,
+            usage=usage.as_dict(),
+            cost_usd=usage.cost_usd,
+        )

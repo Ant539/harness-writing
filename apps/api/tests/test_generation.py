@@ -1,3 +1,6 @@
+import pytest
+
+
 def _create_paper(client, paper_type: str = "conceptual") -> dict:
     response = client.post(
         "/papers",
@@ -40,6 +43,32 @@ def test_generate_outline_for_new_paper_persists_hierarchy(client) -> None:
     outline_response = client.get(f"/papers/{paper['id']}/outline")
     assert outline_response.status_code == 200
     assert len(outline_response.json()["nodes"]) == len(nodes)
+
+
+@pytest.mark.parametrize(
+    ("document_type", "expected_titles"),
+    [
+        ("report", {"Executive Summary", "Findings", "Recommendations"}),
+        ("thesis", {"Literature Review", "Research Design", "Findings and Argument"}),
+        ("proposal", {"Overview", "Problem and Need", "Work Plan", "Expected Outcomes"}),
+        ("technical_document", {"Overview", "Requirements", "Architecture", "Validation"}),
+    ],
+)
+def test_generate_outline_uses_document_type_specific_templates(
+    client,
+    document_type: str,
+    expected_titles: set[str],
+) -> None:
+    paper = _create_paper(client, "conceptual")
+
+    response = client.post(
+        f"/papers/{paper['id']}/generate-outline",
+        json={"document_type": document_type},
+    )
+
+    assert response.status_code == 200
+    titles = {node["title"] for node in response.json()["outline"]}
+    assert expected_titles.issubset(titles)
 
 
 def test_generate_outline_rejects_duplicate_generation(client) -> None:
@@ -108,6 +137,23 @@ def test_generate_section_contract_and_manual_edit(client) -> None:
     assert edited_contract["tone"] == "precise academic"
     assert edited_contract["required_evidence_count"] == 2
     assert edited_contract["forbidden_patterns"] == ["No vague methods claims."]
+
+
+def test_generate_contract_uses_document_type_metadata(client) -> None:
+    paper = _create_paper(client)
+    outline = client.post(
+        f"/papers/{paper['id']}/generate-outline",
+        json={"document_type": "proposal"},
+    ).json()["outline"]
+    work_plan = next(node for node in outline if node["title"] == "Work Plan")
+
+    response = client.post(f"/sections/{work_plan['id']}/generate-contract", json={})
+
+    assert response.status_code == 200
+    contract = response.json()["contract"]
+    assert "proposal" in contract["purpose"]
+    assert contract["tone"] == "persuasive and concrete"
+    assert "What is being proposed?" in contract["questions_to_answer"]
 
 
 def test_generate_contract_rejects_duplicate_without_force_and_updates_with_force(client) -> None:

@@ -38,9 +38,12 @@ class PromptLoggingService:
         prompt_pack_version: str | None = None,
         module_keys: list[str] | None = None,
         request_metadata: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+        cost_usd: float | None = None,
         response_text: str | None = None,
         error_message: str | None = None,
     ) -> PromptExecutionLog:
+        normalized_usage = dict(usage or {})
         log = PromptExecutionLog(
             paper_id=paper_id,
             planning_run_id=planning_run_id,
@@ -56,6 +59,13 @@ class PromptLoggingService:
             prompt_pack_version=prompt_pack_version,
             module_keys=list(module_keys or []),
             request_metadata_json=dict(request_metadata or {}),
+            usage_json=normalized_usage,
+            prompt_tokens=self._int_usage(normalized_usage, "prompt_tokens"),
+            completion_tokens=self._int_usage(normalized_usage, "completion_tokens"),
+            total_tokens=self._int_usage(normalized_usage, "total_tokens"),
+            cached_tokens=self._int_usage(normalized_usage, "cached_tokens"),
+            reasoning_tokens=self._int_usage(normalized_usage, "reasoning_tokens"),
+            cost_usd=cost_usd if cost_usd is not None else self._float_usage(normalized_usage, "cost_usd"),
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_text=response_text,
@@ -98,6 +108,13 @@ class PromptLoggingService:
             prompt_pack_version=log.prompt_pack_version,
             module_keys=log.module_keys,
             request_metadata=log.request_metadata_json,
+            usage=log.usage_json,
+            prompt_tokens=log.prompt_tokens,
+            completion_tokens=log.completion_tokens,
+            total_tokens=log.total_tokens,
+            cached_tokens=log.cached_tokens,
+            reasoning_tokens=log.reasoning_tokens,
+            cost_usd=log.cost_usd,
             system_prompt=log.system_prompt,
             user_prompt=log.user_prompt,
             response_text=log.response_text,
@@ -108,3 +125,28 @@ class PromptLoggingService:
     def prompt_hash(self, system_prompt: str | None, user_prompt: str | None) -> str:
         payload = f"{system_prompt or ''}\n---USER---\n{user_prompt or ''}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _int_usage(self, usage: dict[str, Any], key: str) -> int | None:
+        value = usage.get(key)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        return None
+
+    def _float_usage(self, usage: dict[str, Any], key: str) -> float | None:
+        value = usage.get(key)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None

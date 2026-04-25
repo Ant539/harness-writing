@@ -29,6 +29,8 @@ class LLMResult:
     provider: str
     model: str
     raw: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, Any] = field(default_factory=dict)
+    cost_usd: float | None = None
 
 
 class LLMProvider(Protocol):

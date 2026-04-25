@@ -43,6 +43,15 @@ class FakePlannerProvider:
             content=json.dumps(payload),
             provider=self.provider_name,
             model="fake-model",
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "total_tokens": 140,
+                "cached_tokens": 10,
+                "reasoning_tokens": 5,
+                "cost_usd": 0.0123,
+            },
+            cost_usd=0.0123,
         )
 
 
@@ -114,6 +123,29 @@ def test_discovery_and_plan_endpoints_persist_structured_outputs(client) -> None
     latest_plan = client.get(f"/papers/{paper['id']}/plan")
     assert latest_plan.status_code == 200
     assert latest_plan.json()["id"] == plan["id"]
+
+
+def test_plan_uses_non_paper_document_type_profiles(client) -> None:
+    paper = _create_paper(client)
+    discovery_response = client.post(
+        f"/papers/{paper['id']}/discovery",
+        json={
+            "document_type": "technical_document",
+            "user_goal": "Create an implementation specification for a writing agent.",
+            "audience": "Platform engineers",
+        },
+    )
+    assert discovery_response.status_code == 200
+
+    plan_response = client.post(f"/papers/{paper['id']}/plan", json={})
+
+    assert plan_response.status_code == 200
+    plan = plan_response.json()
+    assert plan["task_profile"]["document_type"] == "technical_document"
+    assert plan["task_profile"]["audience"] == "Platform engineers"
+    assert "technical document" in plan["paper_plan"]["objective"]
+    assert plan["prompt_assembly_hints"]["style_profile"] == "default_technical"
+    assert any("academic paper defaults" in risk for risk in plan["paper_plan"]["global_risks"])
 
 
 def test_plan_builds_mixed_section_actions_from_existing_outline_and_drafts(client) -> None:
@@ -188,5 +220,12 @@ def test_model_backed_planner_persists_prompt_execution_log() -> None:
         assert log.model_name == "fake-model"
         assert log.status == "completed"
         assert log.prompt_hash
+        assert log.prompt_tokens == 100
+        assert log.completion_tokens == 40
+        assert log.total_tokens == 140
+        assert log.cached_tokens == 10
+        assert log.reasoning_tokens == 5
+        assert log.cost_usd == 0.0123
+        assert log.usage_json["total_tokens"] == 140
         assert "Build a structured workflow plan" in (log.user_prompt or "")
         assert "task_profile" in (log.response_text or "")

@@ -339,6 +339,11 @@ class PromptAssemblyService:
             return "This run is for thesis or dissertation writing. Maintain long-horizon consistency across sections."
         if document_type == DocumentType.PROPOSAL:
             return "This run is for proposal writing. Emphasize motivation, scope, feasibility, and constraints."
+        if document_type == DocumentType.TECHNICAL_DOCUMENT:
+            return (
+                "This run is for technical documentation. Emphasize requirements, architecture, interfaces, "
+                "validation, and precise operational guidance."
+            )
         return "This run is for structured technical writing. Keep outputs grounded, explicit, and audience-aware."
 
     def _task_profile_module(
