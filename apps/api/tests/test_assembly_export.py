@@ -150,6 +150,64 @@ def test_global_review_persists_manuscript_level_issues(client) -> None:
     assert len(issues.json()) == len(payload["issues"])
 
 
+def test_global_review_checks_whole_paper_consistency(client) -> None:
+    paper_response = client.post(
+        "/papers",
+        json={
+            "title": "Consistency Harnesses",
+            "paper_type": "conceptual",
+            "target_language": "English",
+        },
+    )
+    paper = paper_response.json()
+    sections = {}
+    for index, title in enumerate(["Abstract", "Introduction", "Conclusion"], start=1):
+        response = client.post(
+            f"/papers/{paper['id']}/sections",
+            json={"title": title, "level": 1, "order_index": index},
+        )
+        assert response.status_code == 201
+        sections[title] = response.json()
+
+    drafts = {
+        "Abstract": (
+            "The abstract focuses on classroom rubric automation and grading dashboards. "
+            "It previews assessment analytics for instructors."
+        ),
+        "Introduction": (
+            "This paper proposes a writing workflow agent for traceable manuscript revision. "
+            "The contribution is a stateful planning and evidence-control architecture."
+        ),
+        "Conclusion": (
+            "The final section closes with deployment notes for a laboratory pipeline assistant. "
+            "This work contributes an operations checklist for experiment monitoring."
+        ),
+    }
+    for title, content in drafts.items():
+        draft = client.post(
+            f"/sections/{sections[title]['id']}/drafts",
+            json={
+                "kind": "section_draft",
+                "version": 1,
+                "content": content,
+                "supported_evidence_ids": [],
+                "status": "active",
+            },
+        )
+        assert draft.status_code == 201
+
+    assemble = client.post(f"/papers/{paper['id']}/assemble", json={})
+    assert assemble.status_code == 200
+
+    review = client.post(f"/papers/{paper['id']}/global-review", json={})
+
+    assert review.status_code == 200
+    issue_types = {issue["issue_type"] for issue in review.json()["issues"]}
+    assert "terminology_drift" in issue_types
+    assert "contribution_alignment" in issue_types
+    assert "abstract_conclusion_mismatch" in issue_types
+
+
 def test_markdown_and_latex_export_are_persisted(client) -> None:
     paper, outline = _create_paper_with_outline(client)
     _draft_section(client, paper, _section(outline, "Introduction"), citation_key="smith2024")

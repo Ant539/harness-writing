@@ -8,6 +8,13 @@ from sqlmodel import Session, select
 from app.api.deps import get_session
 from app.models import EvidencePack, OutlineNode, Paper, SectionContract
 from app.models.enums import ArtifactStatus, SectionStatus
+from app.schemas.approvals import (
+    SectionApprovalDecision,
+    SectionApprovalRead,
+    SectionApprovalRequest,
+    SectionApprovalResponse,
+    SectionUnlockRequest,
+)
 from app.schemas.contracts import (
     ContractGenerationRequest,
     ContractGenerationResponse,
@@ -24,6 +31,7 @@ from app.schemas.outlines import (
 )
 from app.services.crud import create_item, delete_item, get_or_404, update_item
 from app.services.planner import ContractGenerator
+from app.services.section_approvals import SectionApprovalService
 from app.state_machine import InvalidStateTransition, validate_section_transition
 
 router = APIRouter(tags=["sections"])
@@ -154,6 +162,77 @@ def transition_section(
     except InvalidStateTransition as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return update_item(session, section, {"status": payload.status})
+
+
+@router.post("/sections/{section_id}/approval-request", response_model=SectionApprovalRead)
+def request_section_approval(
+    section_id: uuid.UUID,
+    payload: SectionApprovalRequest,
+    session: Session = Depends(get_session),
+) -> SectionApprovalRead:
+    service = SectionApprovalService(session)
+    approval = service.request_approval(section_id, payload)
+    return service.approval_read(approval)
+
+
+@router.post("/sections/{section_id}/approve", response_model=SectionApprovalResponse)
+def approve_section(
+    section_id: uuid.UUID,
+    payload: SectionApprovalDecision,
+    session: Session = Depends(get_session),
+) -> SectionApprovalResponse:
+    service = SectionApprovalService(session)
+    section, approval = service.approve_section(section_id, payload)
+    return SectionApprovalResponse(
+        section=service.section_read(section),
+        approval=service.approval_read(approval),
+    )
+
+
+@router.post("/sections/{section_id}/request-changes", response_model=SectionApprovalResponse)
+def request_section_changes(
+    section_id: uuid.UUID,
+    payload: SectionApprovalDecision,
+    session: Session = Depends(get_session),
+) -> SectionApprovalResponse:
+    service = SectionApprovalService(session)
+    section, approval = service.request_changes(section_id, payload)
+    return SectionApprovalResponse(
+        section=service.section_read(section),
+        approval=service.approval_read(approval),
+    )
+
+
+@router.post("/sections/{section_id}/unlock", response_model=SectionApprovalResponse)
+def unlock_section(
+    section_id: uuid.UUID,
+    payload: SectionUnlockRequest,
+    session: Session = Depends(get_session),
+) -> SectionApprovalResponse:
+    service = SectionApprovalService(session)
+    section, approval = service.unlock_section(section_id, payload)
+    return SectionApprovalResponse(
+        section=service.section_read(section),
+        approval=service.approval_read(approval),
+    )
+
+
+@router.get("/sections/{section_id}/approvals", response_model=list[SectionApprovalRead])
+def list_section_approvals(
+    section_id: uuid.UUID,
+    session: Session = Depends(get_session),
+) -> list[SectionApprovalRead]:
+    service = SectionApprovalService(session)
+    return [service.approval_read(item) for item in service.list_approvals(section_id)]
+
+
+@router.get("/section-approvals/{approval_id}", response_model=SectionApprovalRead)
+def get_section_approval(
+    approval_id: uuid.UUID,
+    session: Session = Depends(get_session),
+) -> SectionApprovalRead:
+    service = SectionApprovalService(session)
+    return service.approval_read(service.get_approval(approval_id))
 
 
 @router.post("/sections/{section_id}/generate-contract", response_model=ContractGenerationResponse)

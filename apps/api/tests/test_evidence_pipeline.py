@@ -126,6 +126,67 @@ def test_build_evidence_pack_moves_section_to_evidence_ready(client) -> None:
     assert section_response.json()["status"] == "evidence_ready"
 
 
+def test_verify_evidence_reports_citation_and_provenance_issues(client) -> None:
+    paper, section, _ = _create_paper_with_contract_section(client)
+    other = client.post(
+        f"/papers/{paper['id']}/sections",
+        json={"title": "Other Section", "level": 1, "order_index": 99},
+    ).json()
+    source = client.post(
+        f"/papers/{paper['id']}/sources",
+        json={
+            "source_type": "paper_summary",
+            "title": "Traceable Source",
+            "source_ref": "smith2024",
+            "content": "Traceable evidence supports the section claim.",
+            "citation_key": "smith2024",
+            "metadata": {},
+        },
+    ).json()
+    extracted = client.post(
+        f"/sources/{source['id']}/extract-evidence",
+        json={"section_id": section["id"]},
+    ).json()["items"][0]
+    misplaced = client.post(
+        f"/papers/{paper['id']}/evidence",
+        json={
+            "section_id": other["id"],
+            "source_type": "note",
+            "content": "This evidence belongs elsewhere and lacks provenance.",
+            "confidence": 0.8,
+            "metadata": {},
+        },
+    ).json()
+    pack = client.post(
+        f"/sections/{section['id']}/evidence-packs",
+        json={"evidence_item_ids": [extracted["id"], misplaced["id"]]},
+    ).json()
+    draft = client.post(
+        f"/sections/{section['id']}/drafts",
+        json={
+            "kind": "section_draft",
+            "version": 1,
+            "content": "This draft cites traceable work [smith2024] and a ghost source [ghost2025].",
+            "supported_evidence_ids": [misplaced["id"]],
+            "status": "active",
+        },
+    ).json()
+
+    response = client.post(f"/sections/{section['id']}/verify-evidence")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["draft_id"] == draft["id"]
+    assert payload["evidence_pack_id"] == pack["id"]
+    codes = {issue["code"] for issue in payload["issues"]}
+    assert {
+        "citation_without_active_pack_evidence",
+        "cited_evidence_not_in_supported_ids",
+        "evidence_assigned_to_different_section",
+        "missing_source_provenance",
+    }.issubset(codes)
+
+
 def test_evidence_pack_duplicate_requires_force_and_force_rebuilds(client) -> None:
     paper, section, _ = _create_paper_with_contract_section(client)
     items = client.post(

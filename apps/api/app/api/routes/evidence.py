@@ -20,12 +20,14 @@ from app.schemas.evidence import (
     EvidencePackMembershipUpdate,
     EvidencePackRead,
     EvidencePackUpdate,
+    EvidenceVerificationResponse,
     SourceMaterialCreate,
     SourceMaterialRead,
     SourceMaterialUpdate,
 )
 from app.services.crud import create_item, delete_item, get_or_404, update_item
 from app.services.research import EvidenceExtractor, EvidencePackBuilder, SourceRegistry
+from app.services.verifier import EvidenceVerificationService
 
 router = APIRouter(tags=["evidence"])
 
@@ -328,6 +330,15 @@ def build_section_evidence_pack(
         pack=_evidence_pack_read(pack),
         items=_pack_items(session, pack),
     )
+
+
+@router.post("/sections/{section_id}/verify-evidence", response_model=EvidenceVerificationResponse)
+def verify_section_evidence(
+    section_id: uuid.UUID,
+    session: Session = Depends(get_session),
+) -> EvidenceVerificationResponse:
+    section = get_or_404(session, OutlineNode, section_id, "Section")
+    return EvidenceVerificationService(session).verify_section(section)
 
 
 @router.get("/evidence-packs/{pack_id}", response_model=EvidencePackRead)

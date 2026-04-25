@@ -35,7 +35,7 @@ SECTION_TRANSITIONS: dict[SectionStatus, set[SectionStatus]] = {
     SectionStatus.REVIEWED: {SectionStatus.REVISION_REQUIRED, SectionStatus.LOCKED},
     SectionStatus.REVISION_REQUIRED: {SectionStatus.REVISED},
     SectionStatus.REVISED: {SectionStatus.REVIEWED, SectionStatus.LOCKED},
-    SectionStatus.LOCKED: set(),
+    SectionStatus.LOCKED: {SectionStatus.REVIEWED},
 }
 
 

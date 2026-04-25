@@ -144,6 +144,22 @@ def test_review_generation_persists_comments_and_revision_tasks(client) -> None:
     assert len(tasks_response.json()) == len(review_payload["revision_tasks"])
 
 
+def test_review_persists_unsupported_citation_findings(client) -> None:
+    _, section, _ = _create_evidence_ready_section(client)
+    draft_payload = _draft_section(client, section["id"])
+    draft = draft_payload["draft"]
+    patched = client.patch(
+        f"/drafts/{draft['id']}",
+        json={"content": f"{draft['content']}\n\nUnsupported citation appears here [ghost2025]."},
+    )
+    assert patched.status_code == 200
+
+    review_payload = _review_section(client, section["id"])
+
+    comments = {comment["comment"] for comment in review_payload["comments"]}
+    assert "Draft uses bracketed citation keys that are not present in the active evidence pack." in comments
+
+
 def test_review_requires_current_draft(client) -> None:
     _, section, _ = _create_evidence_ready_section(client)
 

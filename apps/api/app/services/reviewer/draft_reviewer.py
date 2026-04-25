@@ -40,6 +40,7 @@ class DraftReviewer:
     ) -> list[ReviewFinding]:
         findings = [
             *self.support_checker.check(
+                section=section,
                 contract=contract,
                 evidence_pack=evidence_pack,
                 evidence_items=evidence_items,
@@ -156,7 +157,7 @@ class DraftReviewer:
             key = (finding.comment_type, finding.comment)
             if key not in seen:
                 seen.add(key)
-            unique.append(finding)
+                unique.append(finding)
         return unique
 
     def _llm_findings(

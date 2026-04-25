@@ -39,6 +39,9 @@ class ManuscriptReviewer:
         findings.extend(self._required_section_findings(sections))
         findings.extend(self._transition_findings(manuscript))
         findings.extend(self._terminology_findings(manuscript))
+        section_text = self._section_text_by_title(manuscript)
+        findings.extend(self._contribution_findings(section_text))
+        findings.extend(self._abstract_conclusion_findings(section_text))
         findings.extend(self._ordering_findings(duplicate_sibling_orders))
         if review_instructions:
             findings.append(
@@ -132,16 +135,192 @@ class ManuscriptReviewer:
 
     def _terminology_findings(self, manuscript: AssembledManuscript) -> list[ManuscriptFinding]:
         content = manuscript.content
+        findings: list[ManuscriptFinding] = []
         if re.search(r"\bLLM\b", content) and "large language model" in content.lower():
-            return [
+            findings.append(
                 ManuscriptFinding(
                     issue_type=ManuscriptIssueType.TERMINOLOGY_DRIFT,
                     severity=Severity.LOW,
                     message="Manuscript mixes 'LLM' and 'large language model' terminology.",
                     suggested_action="Choose one preferred term or define the abbreviation once.",
                 )
-            ]
-        return []
+            )
+        variant_groups = [
+            (
+                ("workflow", "pipeline"),
+                "Manuscript alternates between 'workflow' and 'pipeline' for the core process.",
+                "Choose one process term or define the distinction explicitly.",
+            ),
+            (
+                ("agent", "assistant"),
+                "Manuscript alternates between 'agent' and 'assistant' for the system role.",
+                "Use one role term consistently or explain the difference.",
+            ),
+        ]
+        lowered = content.lower()
+        for terms, message, suggested_action in variant_groups:
+            if all(re.search(rf"\b{re.escape(term)}s?\b", lowered) for term in terms):
+                findings.append(
+                    ManuscriptFinding(
+                        issue_type=ManuscriptIssueType.TERMINOLOGY_DRIFT,
+                        severity=Severity.LOW,
+                        message=message,
+                        suggested_action=suggested_action,
+                    )
+                )
+        return findings
+
+    def _section_text_by_title(self, manuscript: AssembledManuscript) -> dict[str, str]:
+        sections: dict[str, list[str]] = {}
+        current_title: str | None = None
+        for line in manuscript.content.splitlines():
+            heading = re.match(r"^(#{2,6})\s+(?P<title>.+?)\s*$", line)
+            if heading:
+                current_title = heading.group("title").strip().lower()
+                sections.setdefault(current_title, [])
+                continue
+            if current_title is not None:
+                sections[current_title].append(line)
+        return {title: "\n".join(lines).strip() for title, lines in sections.items()}
+
+    def _contribution_findings(self, section_text: dict[str, str]) -> list[ManuscriptFinding]:
+        introduction = self._section_text(section_text, "introduction")
+        conclusion = self._section_text(section_text, "conclusion")
+        if not introduction and not conclusion:
+            return []
+
+        findings: list[ManuscriptFinding] = []
+        intro_has_contribution = self._has_contribution_statement(introduction)
+        conclusion_has_contribution = self._has_contribution_statement(conclusion)
+        if introduction and not intro_has_contribution:
+            findings.append(
+                ManuscriptFinding(
+                    issue_type=ManuscriptIssueType.CONTRIBUTION_ALIGNMENT,
+                    severity=Severity.MEDIUM,
+                    message="Introduction does not clearly state the manuscript contribution.",
+                    suggested_action="Add a concise contribution statement to the introduction.",
+                )
+            )
+        if conclusion and intro_has_contribution and not conclusion_has_contribution:
+            findings.append(
+                ManuscriptFinding(
+                    issue_type=ManuscriptIssueType.CONTRIBUTION_ALIGNMENT,
+                    severity=Severity.MEDIUM,
+                    message="Conclusion does not return to the contribution stated in the introduction.",
+                    suggested_action="Echo the introduction's contribution in the conclusion without adding new unsupported claims.",
+                )
+            )
+        if introduction and conclusion and intro_has_contribution and conclusion_has_contribution:
+            intro_terms = self._keyword_set(self._contribution_sentence(introduction) or introduction)
+            conclusion_terms = self._keyword_set(self._contribution_sentence(conclusion) or conclusion)
+            if intro_terms and self._overlap_ratio(intro_terms, conclusion_terms) < 0.2:
+                findings.append(
+                    ManuscriptFinding(
+                        issue_type=ManuscriptIssueType.CONTRIBUTION_ALIGNMENT,
+                        severity=Severity.MEDIUM,
+                        message="Introduction and conclusion appear to describe different contributions.",
+                        suggested_action="Revise the conclusion so it closes the same contribution framed in the introduction.",
+                    )
+                )
+        return findings
+
+    def _abstract_conclusion_findings(
+        self,
+        section_text: dict[str, str],
+    ) -> list[ManuscriptFinding]:
+        abstract = self._section_text(section_text, "abstract")
+        conclusion = self._section_text(section_text, "conclusion")
+        if not abstract or not conclusion:
+            return []
+
+        findings: list[ManuscriptFinding] = []
+        abstract_terms = self._keyword_set(abstract)
+        conclusion_terms = self._keyword_set(conclusion)
+        if abstract_terms and self._overlap_ratio(abstract_terms, conclusion_terms) < 0.15:
+            findings.append(
+                ManuscriptFinding(
+                    issue_type=ManuscriptIssueType.ABSTRACT_CONCLUSION_MISMATCH,
+                    severity=Severity.MEDIUM,
+                    message="Abstract and conclusion emphasize different topics.",
+                    suggested_action="Align the conclusion with the abstract's main terms and delivery promise.",
+                )
+            )
+        if self._has_contribution_statement(conclusion) and not self._has_contribution_statement(abstract):
+            findings.append(
+                ManuscriptFinding(
+                    issue_type=ManuscriptIssueType.ABSTRACT_CONCLUSION_MISMATCH,
+                    severity=Severity.MEDIUM,
+                    message="Conclusion states a contribution that the abstract does not preview.",
+                    suggested_action="Preview the final contribution in the abstract or narrow the conclusion.",
+                )
+            )
+        return findings
+
+    def _section_text(self, section_text: dict[str, str], title_fragment: str) -> str:
+        for title, text in section_text.items():
+            if title_fragment in title:
+                return text
+        return ""
+
+    def _has_contribution_statement(self, text: str) -> bool:
+        lowered = text.lower()
+        patterns = [
+            r"\bcontribution(s)?\b",
+            r"\bwe (propose|present|introduce|contribute)\b",
+            r"\bthis (paper|work|study) (proposes|presents|introduces|contributes)\b",
+            r"\bour (approach|framework|method|system) (contributes|provides|offers)\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in patterns)
+
+    def _contribution_sentence(self, text: str) -> str | None:
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+            if sentence.strip()
+        ]
+        for sentence in sentences:
+            if self._has_contribution_statement(sentence):
+                return sentence
+        return None
+
+    def _keyword_set(self, text: str) -> set[str]:
+        stopwords = {
+            "about",
+            "after",
+            "also",
+            "and",
+            "are",
+            "before",
+            "but",
+            "can",
+            "for",
+            "from",
+            "has",
+            "have",
+            "into",
+            "its",
+            "later",
+            "manuscript",
+            "paper",
+            "section",
+            "that",
+            "the",
+            "their",
+            "these",
+            "this",
+            "through",
+            "with",
+        }
+        return {
+            token
+            for token in re.findall(r"\b[a-z][a-z0-9-]{4,}\b", text.lower())
+            if token not in stopwords
+        }
+
+    def _overlap_ratio(self, first: set[str], second: set[str]) -> float:
+        if not first or not second:
+            return 0.0
+        return len(first & second) / max(1, min(len(first), len(second)))
 
     def _ordering_findings(self, duplicate_sibling_orders: list[str]) -> list[ManuscriptFinding]:
         return [

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
-from app.models.enums import ArtifactStatus, EvidenceSourceType
+from app.models.enums import ArtifactStatus, EvidenceSourceType, Severity
 from app.schemas.common import ApiSchema
 
 
@@ -123,3 +123,20 @@ class EvidencePackBuildResponse(ApiSchema):
 
 class EvidencePackMembershipUpdate(ApiSchema):
     evidence_item_id: uuid.UUID
+
+
+class EvidenceVerificationIssue(ApiSchema):
+    code: str
+    severity: Severity
+    message: str
+    suggested_action: str
+    evidence_id: uuid.UUID | None = None
+    citation_key: str | None = None
+
+
+class EvidenceVerificationResponse(ApiSchema):
+    section_id: uuid.UUID
+    draft_id: uuid.UUID
+    evidence_pack_id: uuid.UUID
+    issue_count: int
+    issues: list[EvidenceVerificationIssue]
