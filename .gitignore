@@ -29,3 +29,6 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Unpublished manuscripts
+paper/jsc/
