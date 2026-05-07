@@ -15,6 +15,7 @@ from app.api.routes import (
     prompts,
     reviews,
     sections,
+    writing_harness,
     workflows,
 )
 from app.db import create_db_and_tables
@@ -39,6 +40,7 @@ def create_app(*, init_database: bool = True) -> FastAPI:
     app.include_router(interactions.router)
     app.include_router(planning.router)
     app.include_router(prompts.router)
+    app.include_router(writing_harness.router)
     app.include_router(workflows.router)
     app.include_router(sections.router)
     app.include_router(evidence.router)

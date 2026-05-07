@@ -14,6 +14,7 @@ from app.models.review import ReviewComment
 from app.models.revision import RevisionTask
 from app.models.style import StyleGuide
 from app.models.workflow import WorkflowRun, WorkflowStepRun
+from app.models.writing_harness import WritingHarnessRun
 
 __all__ = [
     "AssembledManuscript",
@@ -39,4 +40,5 @@ __all__ = [
     "WorkflowCheckpoint",
     "WorkflowRun",
     "WorkflowStepRun",
+    "WritingHarnessRun",
 ]
